@@ -1,28 +1,96 @@
 # ESP32-C6 / ESP32-P4 Porting Guide for Jcorp Nomad
 
-## 🚀 **NEW: ESP32-P4 + ESP32-C6 Combo Board - RECOMMENDED UPGRADE**
+## ⚠️ **IMPORTANT: ESP32-P4 + ESP32-C6 Combo Board Analysis**
 
-**If you have a P4+C6 combo board (like Waveshare ESP32-P4-WIFI6), this is actually a SUPERIOR architecture to ESP32-S3!**
+**Based on real-world testing by the original developer:**
 
-### Why P4+C6 Combo is Better:
+### ❌ Problem Confirmed: WiFi + SD Don't Work Simultaneously on UART-based P4+C6 Boards
 
-| Feature | ESP32-S3 (Current) | ESP32-P4 + C6 Combo | Winner |
-|---------|-------------------|---------------------|--------|
-| CPU Speed | 240 MHz dual-core | 400 MHz dual-core | **P4: 66% faster** |
-| RAM | 512 KB SRAM | 768 KB SRAM + 32MB PSRAM | **P4: 4x more** |
-| WiFi | WiFi 4 (2.4GHz) | WiFi 6 (2.4GHz) | **P4+C6: Faster, more efficient** |
-| SD Card Interface | SDMMC 4-bit | SDMMC 4-bit | **Equal** |
-| **WiFi + SD Conflict** | ⚠️ Same hardware, needs throttling | ✅ **NO CONFLICT** (separate chips!) | **P4+C6: Much better** |
-| Video Streaming | Good | Excellent (2.5x CPU power) | **P4+C6** |
-| Multi-user Support | 3-4 users | 5-8+ users (more RAM/CPU) | **P4+C6** |
+The original coder tested an ESP32-P4+C6 combo board (like JC-ESP32P4-M3-DEV) and found that **WiFi and SD card cannot operate at the same time**, unlike the ESP32-S3 which works fine.
 
-**Key Advantage:** The P4 has **NO WiFi radio**, so there's **ZERO interference** with SD card operations. The C6 handles WiFi on a completely separate chip via SDIO, eliminating the software conflicts that plague S3.
+### Root Cause: UART Communication Bottleneck
 
-**Estimated Porting Effort:** 8-15 hours (moderate)
+**JC-ESP32P4-M3-DEV Architecture:**
+```
+ESP32-P4 (SD card)  ←─ UART (115200 baud ≈ 11 KB/s) ─→  ESP32-C6 (WiFi)
+```
 
-**Performance Gain:** 2-3x overall improvement
+**Why This Fails for Media Streaming:**
 
-**Skip to:** [ESP32-P4 + C6 Combo Board Instructions](#esp32-p4--esp32-c6-combo-board-detailed-guide)
+| Interface | Bandwidth | Reality |
+|-----------|-----------|---------|
+| SD Card (SDMMC) | 20-40 MB/s | ✅ Fast enough for HD video |
+| UART (P4↔C6) | **0.01-0.5 MB/s** | ❌ **1000x too slow!** |
+| WiFi 6 | Up to 100 MB/s | ✅ Fast enough |
+
+**Bottleneck:** Even at maximum UART speed (921600 baud), you only get ~92 KB/s - nowhere near enough for video streaming.
+
+### Comparison of P4+C6 Communication Methods
+
+| Board Type | P4↔C6 Interface | Bandwidth | Can Stream Video? |
+|------------|----------------|-----------|-------------------|
+| **JC-ESP32P4-M3-DEV** | **UART** | **11-92 KB/s** | ❌ **NO** |
+| Espressif P4 Function EV | SDIO | 40-200 MB/s | ✅ Yes |
+| Waveshare ESP32-P4-WIFI6 | SDIO | 40-200 MB/s | ✅ Yes |
+
+**Your board (UART-based) cannot handle simultaneous WiFi + SD for this use case.**
+
+---
+
+## JC-ESP32P4-M3-DEV Specific Pin Analysis
+
+Based on the schematic, here's why WiFi + SD fail on this board:
+
+### P4 ↔ C6 Communication (UART - THE BOTTLENECK)
+
+| Signal | ESP32-P4 GPIO | ESP32-C6 GPIO | Max Speed |
+|--------|---------------|---------------|-----------|
+| TX | 44 | 16 | 921600 baud |
+| RX | 43 | 17 | = 92 KB/s max |
+| RTS | 45 | 18 | Flow control |
+| CTS | 46 | 19 | Flow control |
+
+**Reality Check:**
+- Video bitrate: 500-2000 KB/s (SD quality)
+- UART max: 92 KB/s
+- **Gap: 5-20x too slow**
+
+### SD Card Pins (ESP32-P4 SDMMC)
+
+| Signal | ESP32-P4 GPIO | Notes |
+|--------|---------------|-------|
+| SD_CLK | 12 | ✅ No conflict with UART |
+| SD_CMD | 11 | ✅ No conflict |
+| SD_D0 | 13 | ✅ No conflict |
+| SD_D1 | 14 | ✅ No conflict |
+| SD_D2 | 15 | ✅ No conflict |
+| SD_D3 | 16 | ✅ No conflict |
+| SD_CD | 10 | Card detect |
+
+**Pins are fine** - the problem is architectural:
+```
+SD Card (20 MB/s) → P4 → [UART 0.09 MB/s BOTTLENECK] → C6 → WiFi
+```
+
+### Why This Architecture Fails
+
+**Typical media streaming flow:**
+1. User's browser → WiFi → C6: "GET /video.mp4"
+2. C6 → UART → P4: "Send me video.mp4"
+3. P4 reads SD card at 20 MB/s ✅
+4. P4 → **UART** → C6: Sending video data... ❌ **BLOCKED HERE**
+5. UART can only push 92 KB/s, but video needs 500+ KB/s
+6. Result: Buffering, stuttering, timeout
+
+### Could You Work Around It?
+
+**Possible (terrible) workarounds:**
+
+1. **Lower video quality to 480p @ 64 KB/s** - Barely fits in UART, looks terrible
+2. **Pre-transcode all media** - Massive storage overhead
+3. **Time-multiplex**: WiFi OR SD, never both - Defeats the purpose
+
+**None of these are practical for a media server.**
 
 ---
 
@@ -380,9 +448,15 @@ ESP32-P4 may or may not have USB OTG depending on the board. Check your board's 
 
 ---
 
-## ESP32-P4 + ESP32-C6 Combo Board Detailed Guide
+## ESP32-P4 + ESP32-C6 Combo Board Detailed Guide (SDIO-based Only)
 
-**This section is for Waveshare ESP32-P4-WIFI6 or similar combo boards with both P4 and C6 on the same PCB.**
+**⚠️ WARNING: This section ONLY applies to SDIO-based P4+C6 boards (like Espressif Function EV Board).**
+
+**This does NOT apply to:**
+- JC-ESP32P4-M3-DEV (uses UART - too slow)
+- Any board where P4↔C6 communicate via UART
+
+**If your board uses UART between P4 and C6, skip this section** - it won't work for media streaming.
 
 ### Architecture Overview
 
@@ -688,23 +762,44 @@ if (!SD_MMC.begin("/sdcard", true, false, SDMMC_FREQ_HIGHSPEED, 12)) {
 
 ## Final Recommendations
 
-### For P4+C6 Combo Board Owners
+### For UART-based P4+C6 Boards (JC-ESP32P4-M3-DEV, etc.)
 
-**✅ STRONGLY RECOMMEND PORTING** - The combo board is superior to ESP32-S3:
+**❌ NOT RECOMMENDED** - UART bottleneck makes this unusable for media streaming:
 
-**Benefits:**
+**Why It Doesn't Work:**
+- UART bandwidth: 11-92 KB/s (even at max speed)
+- Video streaming needs: 500+ KB/s minimum
+- **UART is 5-50x too slow** for this application
+- Original coder confirmed WiFi+SD don't work simultaneously
+
+**Confirmed by real-world testing:** The developer tried this architecture and it failed.
+
+---
+
+### For SDIO-based P4+C6 Boards (Espressif EV Board, Some Waveshare)
+
+**✅ POTENTIALLY GOOD** - But check your specific board:
+
+**Benefits IF your board uses SDIO:**
 - 66% faster CPU (400MHz vs 240MHz)
 - 4x more RAM (768KB + 32MB PSRAM vs 512KB)
+- SDIO bandwidth: 40-200 MB/s (fast enough!)
 - WiFi 6 instead of WiFi 4
-- **ZERO WiFi/SD conflicts** (separate chips!)
-- 2-3x overall performance improvement
-- Support 2x more simultaneous users
 
-**Effort:** 8-15 hours (moderate)
+**How to check:** Look at the schematic - if P4↔C6 uses GPIO 14-19 for SDIO (not UART), it may work.
 
-**Risk:** Low - SDMMC still works, just need WiFi API updates
+**Effort:** 8-15 hours (moderate complexity)
+
+---
 
 ### For Single-Chip Options
+
+**ESP32-S3:** ✅ **STRONGLY RECOMMENDED - BEST OPTION**
+- Already works perfectly for this project
+- WiFi + SD work simultaneously (confirmed by coder)
+- No changes needed
+- Proven stability
+- 240MHz is fast enough for multi-user streaming
 
 **ESP32-C6 alone:** ❌ NOT RECOMMENDED
 - No SDMMC (must use slow SPI)
@@ -715,10 +810,18 @@ if (!SD_MMC.begin("/sdcard", true, false, SDMMC_FREQ_HIGHSPEED, 12)) {
 - No WiFi (would need external module)
 - Complex to implement
 
-**ESP32-S3:** ✅ BEST SINGLE-CHIP OPTION
-- Already optimized for this use case
-- No changes needed
-- Proven stability
+---
+
+## Summary: What to Tell the Original Coder
+
+**The problem they experienced is real and fundamental:**
+
+1. ✅ **ESP32-S3 works great** - keep using it
+2. ❌ **UART-based P4+C6 won't work** - UART is too slow for video
+3. ⚠️ **SDIO-based P4+C6 would work** - but need different board
+4. 💡 **Best solution:** Stay with ESP32-S3
+
+**The issue isn't a software bug** - it's a hardware limitation of UART communication between the chips.
 
 ---
 
