@@ -619,9 +619,10 @@ def preflight(plan: FlashPlan, chip: Optional[ChipInfo],
 
 
 def flash(tool: EspTool, plan: FlashPlan, port: str, baud: int = DEFAULT_BAUD,
-          erase_all: bool = False, dry_run: bool = False) -> None:
+          erase_all: bool = False, dry_run: bool = False,
+          chip: str = "esp32s3") -> None:
     args = [
-        "--chip", "esp32s3",
+        "--chip", chip,
         "--port", port,
         "--baud", str(baud),
         "--before", tool.sub("default_reset"),
@@ -644,9 +645,10 @@ def flash(tool: EspTool, plan: FlashPlan, port: str, baud: int = DEFAULT_BAUD,
         )
 
 
-def erase_flash(tool: EspTool, port: str, baud: int = DEFAULT_BAUD, dry_run: bool = False) -> None:
+def erase_flash(tool: EspTool, port: str, baud: int = DEFAULT_BAUD,
+                dry_run: bool = False, chip: str = "esp32s3") -> None:
     proc = tool.run(
-        ["--chip", "esp32s3", "--port", port, "--baud", str(baud), tool.sub("erase_flash")],
+        ["--chip", chip, "--port", port, "--baud", str(baud), tool.sub("erase_flash")],
         dry_run=dry_run, stream=True, timeout=900,
     )
     if not dry_run and proc.returncode != 0:

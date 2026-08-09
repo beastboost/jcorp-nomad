@@ -405,6 +405,46 @@ def run_recheck_tests() -> int:
     return failures
 
 
+def run_chip_arg_tests() -> int:
+    """esptool takes --chip, and it was hardcoded to esp32s3 - so a P4 build
+    compiled, passed every pre-flash check, and then died at the write with
+    "This chip is ESP32-P4, not ESP32-S3". It is derived from the FQBN now;
+    this makes sure it stays that way, and that no literal creeps back in.
+    """
+    import re
+
+    c.heading("esptool --chip argument")
+    failures = 0
+    rows = []
+    for key in sorted(boards.BOARDS):
+        board = boards.BOARDS[key]
+        want = board.fqbn.split(":")[-1]
+        got = board.esptool_chip
+        ok = got == want
+        failures += 0 if ok else 1
+        rows.append([key, "PASS" if ok else "FAIL", got, board.chip_name])
+    c.table(["board", "result", "--chip", "expected silicon"], rows)
+
+    # And no hardcoded target outside a default argument.
+    source = (Path(__file__).parent / "esp.py").read_text(encoding="utf-8")
+    stray = []
+    for num, line in enumerate(source.splitlines(), 1):
+        if not re.search(r"esp32(s3|p4|s2|c3|c6)", line):
+            continue
+        if "chip: str =" in line or line.lstrip().startswith(("#", "*")):
+            continue
+        if "build/esp32" in line:            # a path in a help string
+            continue
+        stray.append(f"{num}: {line.strip()[:56]}")
+    if stray:
+        failures += len(stray)
+        for s in stray:
+            c.error(f"hardcoded target in esp.py {s}")
+    else:
+        c.ok("no hardcoded chip target in the flash path")
+    return failures
+
+
 def run_sketch_lint_tests() -> int:
     """arduino-cli generates a prototype for every function in a .ino and
     inserts them above the sketch's own declarations. A signature naming a
@@ -502,7 +542,7 @@ def cmd_selftest(args) -> int:
     failures = (run_fat32_tests() + run_chip_probe_tests()
                 + run_preflight_tests() + run_diagnosis_tests()
                 + run_picker_tests() + run_port_tests() + run_recheck_tests()
-                + run_sketch_lint_tests()
+                + run_sketch_lint_tests() + run_chip_arg_tests()
                 + run_template_tests())
 
     c.heading("Result")
