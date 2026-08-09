@@ -62,7 +62,8 @@ tools\nomad-setup.bat               # same thing on Windows
 | `nomad-setup sdcard` | Format a card and copy the Nomad files onto it |
 | `nomad-setup list-disks` / `list-ports` | Just the lists |
 
-Start with `doctor`. It tells you what is missing before anything is at stake.
+Start with `doctor`. It reports what is installed, what is missing, and ends
+with the single command to run next.
 
 ### Running it on Windows
 
@@ -93,6 +94,31 @@ PowerShell. Without it the error text goes to a separate stream and is lost.
 If you double-click it and the window closes instantly, the launcher now holds
 it open and prints the exit code. A window that still vanishes means `cmd` never
 reached the script at all, usually a path or permissions problem.
+
+### Starting from nothing
+
+If `doctor` finds neither arduino-cli nor esptool, install arduino-cli — the
+ESP32 core it fetches bundles esptool, so one install covers both:
+
+| | |
+| --- | --- |
+| Windows | `winget install ArduinoSA.CLI` |
+| macOS | `brew install arduino-cli` |
+| Linux | `curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \| BINDIR=~/.local/bin sh` |
+
+Reopen your terminal so `PATH` updates, then:
+
+```
+nomad-setup flash --install-deps
+```
+
+That fetches the ESP32 core and the five pinned libraries (a one-off download
+of roughly a gigabyte), builds the firmware, and writes it to the board.
+
+For the card, use a **card reader** the first time. The Nomad stick cannot show
+you its own microSD until the firmware is on it and it has been booted into USB
+mass-storage mode — so on a fresh board it is a chicken-and-egg. After the first
+flash you can use the stick itself.
 
 ### Useful flags
 
