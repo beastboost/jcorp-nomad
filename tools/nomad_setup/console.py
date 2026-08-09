@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 
 def _supports_colour() -> bool:
@@ -193,14 +193,63 @@ def choose(prompt: str, options: List[tuple], default_index: Optional[int] = Non
     while True:
         hint = f" [{default_index + 1}]" if default_index is not None else ""
         try:
-            raw = input(f"  Choice{hint}: ").strip()
+            raw = input(f"  Choice (number or name){hint}: ").strip()
         except EOFError:
             raw = ""
         if not raw and default_index is not None:
             return options[default_index][0]
-        if raw.isdigit() and 1 <= int(raw) <= len(options):
-            return options[int(raw) - 1][0]
-        error("Enter one of the numbers listed above.")
+
+        index, message = resolve_choice(raw, options)
+        if index is not None:
+            return options[index][0]
+        error(message)
+
+
+def resolve_choice(raw: str, options: List[tuple]) -> Tuple[Optional[int], str]:
+    """Work out which option `raw` means. Returns (index, error message).
+
+    Listing "1) COM6" and then rejecting "COM6" is indefensible, so the name is
+    accepted as readily as the number, in any case, and so is any fragment that
+    picks out exactly one option. The list index still wins outright when it is
+    a valid one - the numbers on screen have to mean what they say.
+    """
+    raw = raw.strip()
+    if not raw:
+        return None, "Type the number next to the one you want, or its name."
+
+    if raw.isdigit() and 1 <= int(raw) <= len(options):
+        return int(raw) - 1, ""
+
+    def texts(i: int) -> List[str]:
+        value, label = options[i]
+        out = [str(label)]
+        if isinstance(value, str):
+            out.append(value)
+        return out
+
+    needle = raw.casefold()
+
+    exact = [i for i in range(len(options))
+             if any(t.casefold() == needle for t in texts(i))]
+    if len(exact) == 1:
+        return exact[0], ""
+
+    # First word of the label, so "/dev/sdb" picks out "/dev/sdb  SanDisk 32 GB".
+    lead = [i for i in range(len(options))
+            if any(t.casefold().split()[:1] == [needle] for t in texts(i) if t.split())]
+    if len(lead) == 1:
+        return lead[0], ""
+
+    partial = [i for i in range(len(options))
+               if any(needle in t.casefold() for t in texts(i))]
+    if len(partial) == 1:
+        return partial[0], ""
+    if len(partial) > 1:
+        names = ", ".join(str(options[i][1]).split()[0] for i in partial)
+        return None, f"'{raw}' matches more than one: {names}. Be more specific."
+
+    return None, (f"No option matches '{raw}'. Type the number next to the one "
+                  "you want, or its name.")
 
 
 class ProgressBar:

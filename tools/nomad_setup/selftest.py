@@ -285,6 +285,45 @@ def run_diagnosis_tests() -> int:
     return failures
 
 
+_PORTS = [("COM6", "COM6"), ("COM9", "COM9"), ("COM8", "COM8")]
+_DISKS = [("/dev/sdb", "/dev/sdb  SanDisk Ultra 32 GB"),
+          ("/dev/sdc", "/dev/sdc  Generic 8 GB")]
+_TRICKY = [("COM3", "COM3"), ("COM1", "COM1")]      # index 1 vs a port named COM1
+_AMBIG = [("COM6", "COM6"), ("COM16", "COM16")]     # "6" occurs in both
+
+# Listing "1) COM6" and then rejecting "COM6" is indefensible. None is "refuse".
+_PICKER_CASES = [
+    ("port by index",          _PORTS,  "1",        "COM6"),
+    ("port by name",           _PORTS,  "COM6",     "COM6"),
+    ("port by name, lowercase", _PORTS, "com6",     "COM6"),
+    ("port by its own digit",  _PORTS,  "6",        "COM6"),
+    ("disk by path",           _DISKS,  "/dev/sdb", "/dev/sdb"),
+    ("disk by bare name",      _DISKS,  "sdb",      "/dev/sdb"),
+    ("disk by brand",          _DISKS,  "SanDisk",  "/dev/sdb"),
+    ("index beats a lookalike name", _TRICKY, "1",  "COM3"),
+    ("that lookalike by name", _TRICKY, "COM1",     "COM1"),
+    ("ambiguous fragment",     _AMBIG,  "6",        None),
+    ("exact wins over ambiguity", _AMBIG, "COM6",   "COM6"),
+    ("matches nothing",        _PORTS,  "COM4",     None),
+    ("empty",                  _PORTS,  "",         None),
+]
+
+
+def run_picker_tests() -> int:
+    c.heading("Port and disk picker")
+    failures = 0
+    rows = []
+    for name, options, typed, expect in _PICKER_CASES:
+        index, message = c.resolve_choice(typed, options)
+        got = options[index][0] if index is not None else None
+        passed = got == expect
+        failures += 0 if passed else 1
+        rows.append([name, "PASS" if passed else "FAIL", repr(typed),
+                     got if got is not None else "refused"])
+    c.table(["case", "result", "typed", "selected"], rows)
+    return failures
+
+
 def run_template_tests() -> int:
     """The required-files manifest is only useful if it matches the template
     actually shipped in the repo, so check the two against each other."""
@@ -339,7 +378,7 @@ def cmd_selftest(args) -> int:
 
     failures = (run_fat32_tests() + run_chip_probe_tests()
                 + run_preflight_tests() + run_diagnosis_tests()
-                + run_template_tests())
+                + run_picker_tests() + run_template_tests())
 
     c.heading("Result")
     if failures:
