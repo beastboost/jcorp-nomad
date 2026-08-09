@@ -223,12 +223,20 @@
 //   in this file configures that - it is a core/sdkconfig matter - but it is
 //   why the C6's slave firmware version has to match the Arduino core's.
 //
-// The SD pins below are the ESP32-P4 SDMMC slot-0 defaults. This board's actual
-// wiring is not published anywhere I could verify, so NOMAD_SD_USE_DEFAULT_PINS
-// makes the driver call SD_MMC.begin() without setPins() and let the core use
-// its own defaults. Run firmware/NomadP4Probe to find the real pins; if it
-// reports a set that differs, set NOMAD_SD_USE_DEFAULT_PINS to 0 and fill these
-// in.
+// SD pins below are slot 0's IOMUX pins, taken from ESP-IDF
+// soc/esp32p4/include/soc/sdmmc_pins.h - not guessed. The P4 can also route
+// SDMMC over the GPIO matrix, so a board may wire the card elsewhere; this
+// board's schematic is not published anywhere I could verify, which is why
+// NOMAD_SD_USE_DEFAULT_PINS leaves the choice to the core. Run
+// firmware/NomadP4Probe to confirm.
+//
+// Two things about the P4's card slot that have no equivalent on the S3:
+//   - the slot has a power-enable pin, and
+//   - GPIO 39-48 sit behind on-chip LDO VO4 and are dead until it is up.
+// Both come from the Arduino variant (BOARD_SDMMC_POWER_PIN,
+// BOARD_PERIMAN_IO_LDO_*), so they are handled for us on the EV-board variant.
+// If a custom variant is ever needed for this board, they must be carried over
+// or the card simply never powers up - which looks exactly like bad wiring.
 #define NOMAD_BOARD_NAME "Guition JC-ESP32P4-M3-DEV"
 
 // ---- display: none -------------------------------------------------------
@@ -250,9 +258,12 @@
 #define LED_PIN_DATA  -1
 #define LED_PIN_CLOCK -1
 
-// The dev board has a BOOT button on the usual strapping pin. Without a screen
-// the short-press page cycle does nothing, but the long-press USB mass-storage
-// mode still matters.
+// GPIO 35 is the P4's BOOT_MODE strapping pin (the Arduino variant notes
+// "BOOT_MODE 35", with BOOT_MODE2 on 36). Note that on the EV-board variant 35
+// is also ETH_RMII_TX1, so if Ethernet is ever brought up on this board the
+// button and the PHY collide and this needs revisiting. Without a screen the
+// short-press page cycle does nothing; the long-press USB mass-storage mode
+// still matters.
 #define BOOT_BUTTON_PIN 35
 
 #else

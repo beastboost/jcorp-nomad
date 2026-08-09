@@ -47,6 +47,33 @@ What is known:
   station-only by design.
 * P4 support has been in the Arduino core since 3.1.0 (ESP-IDF 5.3).
 
+### The `esp32p4` FQBN is the EV board, not a generic P4
+
+This is the most important thing on this page. `arduino-esp32`'s `esp32p4`
+variant header says so in its own comment — *"ESP32-P4 EV Function board
+specific definitions"* — and it hardcodes, among other things, **the SDIO pins
+that carry the C6 Wi-Fi link**:
+
+```c
+#define BOARD_SDIO_ESP_HOSTED_CLK   18
+#define BOARD_SDIO_ESP_HOSTED_CMD   19
+#define BOARD_SDIO_ESP_HOSTED_D0    14   // D1 15, D2 16, D3 17
+#define BOARD_SDIO_ESP_HOSTED_RESET 54
+```
+
+Those are Espressif's EV-board pins. If Guition wired the C6 to anything else,
+Wi-Fi cannot come up and nothing in Nomad can fix it — it needs a custom
+variant. `NomadP4Probe` now prints these numbers so they can be compared
+against the schematic; that is the first thing to rule out if the radio is dead.
+
+The same header also carries two things the S3 has no equivalent of, both easy
+to miss:
+
+* `BOARD_SDMMC_POWER_PIN 45` (active **LOW**) — the card slot has a power
+  switch. Miss it and the card never powers up, which reads as bad wiring.
+* `BOARD_PERIMAN_IO_LDO0_*` — GPIO **39–48 sit behind on-chip LDO VO4** at
+  3300 mV and are dead until it is enabled. The SD data pins are in that range.
+
 Worth checking on arrival, none of which blocks the port:
 
 * Whether the C6's pre-flashed slave firmware matches what a current Arduino
@@ -56,8 +83,26 @@ Worth checking on arrival, none of which blocks the port:
 * SoftAP stability. Association problems on P4+C6 over SDIO get reported (e.g.
   [esphome/esphome#10956](https://github.com/esphome/esphome/issues/10956)),
   though mostly against station mode.
-* This board's **SD pin map**, which is not in any datasheet I could verify.
-  The profile currently lets the core use its own SDMMC defaults.
+* This board's **SD pin map**. Slot 0's IOMUX pins are CLK 43, CMD 44, D0–D3
+  39–42 (ESP-IDF `soc/esp32p4/include/soc/sdmmc_pins.h`), and the profile uses
+  those — but the P4 also supports SDMMC over the GPIO matrix
+  (`SOC_SDMMC_USE_GPIO_MATRIX`), so this board is free to have wired the card
+  somewhere else. Guition publish no schematic I could find.
+
+### Sourcing note
+
+Pin numbers on this page come from ESP-IDF and `arduino-esp32` headers, cited
+inline. Nothing here is from Guition, because I could not reach any
+manufacturer documentation — their manual pages and the ESPHome device entry
+are both blocked from this environment. So these are *the reference design's*
+pins, which this board may or may not follow. Treat every number as needing
+confirmation against the hardware.
+
+An earlier version of `NomadP4Probe` swept three "candidate" SD pin sets that
+were invented rather than sourced, and two of them were actively harmful:
+`{18,19,14,15,16,17}` are the C6's SDIO link and `{...37,38}` are the console
+UART. Driving either as an SD bus breaks the thing under test. The sweep is now
+a single sourced entry.
 
 ## Run this first
 

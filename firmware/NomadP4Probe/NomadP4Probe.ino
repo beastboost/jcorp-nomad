@@ -76,6 +76,25 @@ static void reportHostedLink() {
   Serial.println("  The P4 has no radio of its own. Everything below depends on");
   Serial.println("  the C6 answering over SDIO.");
 
+  // The stock esp32p4 Arduino variant is the ESP32-P4 *Function EV Board* -
+  // its own header says so - and these pin numbers come from it, not from the
+  // Guition board. If Guition wired the C6 anywhere else, the link cannot come
+  // up and no amount of Nomad code fixes it; it needs a custom variant. So
+  // print what this build actually compiled in, and compare it to the
+  // schematic.
+#ifdef BOARD_HAS_SDIO_ESP_HOSTED
+  Serial.printf("  hosted SDIO pins compiled in: CLK %d CMD %d D0 %d D1 %d D2 %d D3 %d, reset %d\n",
+                BOARD_SDIO_ESP_HOSTED_CLK, BOARD_SDIO_ESP_HOSTED_CMD,
+                BOARD_SDIO_ESP_HOSTED_D0, BOARD_SDIO_ESP_HOSTED_D1,
+                BOARD_SDIO_ESP_HOSTED_D2, BOARD_SDIO_ESP_HOSTED_D3,
+                BOARD_SDIO_ESP_HOSTED_RESET);
+  Serial.println("    ^ these are the EV-board's pins. Check them against this");
+  Serial.println("      board's schematic - a mismatch is the first thing to rule out.");
+#else
+  Serial.println("  *** This build has no ESP-Hosted SDIO configuration at all.");
+  Serial.println("  *** Wi-Fi cannot work. Wrong board selected in the FQBN?");
+#endif
+
   // Bringing the driver up is itself the test: on a broken or version-mismatched
   // hosted link, mode() fails or the MAC comes back all zeroes.
   if (!WiFi.mode(WIFI_AP)) {
@@ -167,14 +186,42 @@ struct SdPinSet {
   int clk, cmd, d0, d1, d2, d3;
 };
 
-// The SD wiring for this board is not in any datasheet I could verify, so these
-// are candidates, not a pin map. Whichever mounts gets printed - copy it into
-// board_config.h rather than trusting anything here.
+// Slot 0's IOMUX pins, from ESP-IDF soc/esp32p4/include/soc/sdmmc_pins.h. The
+// P4 can also route SDMMC through the GPIO matrix (SOC_SDMMC_USE_GPIO_MATRIX),
+// so a board is free to wire the card anywhere - but IOMUX is what the Arduino
+// variant selects and what a board following the reference design uses.
+//
+// There is deliberately only one entry. An earlier version of this sketch swept
+// "alternative" pin sets that were invented rather than sourced, and two of them
+// were actively harmful on this board: {18,19,14,15,16,17} are the SDIO pins
+// carrying the ESP32-C6 Wi-Fi link, and {..37,38} are the console UART. Driving
+// either as an SD bus breaks the thing you are trying to test. If the card does
+// not appear on these pins, read the schematic - do not guess.
 static const SdPinSet kCandidates[] = {
-  {"P4 EV-board style", 43, 44, 39, 40, 41, 42},
-  {"alt A",             18, 19, 14, 15, 16, 17},
-  {"alt B",             34, 33, 35, 36, 37, 38},
+  {"slot 0 IOMUX", 43, 44, 39, 40, 41, 42},
 };
+
+// The card slot has its own power switch on the Function EV board, and GPIO
+// 39-48 sit behind on-chip LDO VO4. Get either wrong and the card never powers
+// up, which looks exactly like bad wiring.
+#ifndef BOARD_SDMMC_POWER_PIN
+#define BOARD_SDMMC_POWER_PIN -1
+#endif
+#ifndef BOARD_SDMMC_POWER_ON_LEVEL
+#define BOARD_SDMMC_POWER_ON_LEVEL LOW
+#endif
+
+static void sdPowerOn() {
+  if (BOARD_SDMMC_POWER_PIN < 0) {
+    Serial.println("  no SD power-enable pin defined for this variant");
+    return;
+  }
+  Serial.printf("  powering the slot: GPIO %d -> %s\n", (int)BOARD_SDMMC_POWER_PIN,
+                BOARD_SDMMC_POWER_ON_LEVEL == LOW ? "LOW" : "HIGH");
+  pinMode(BOARD_SDMMC_POWER_PIN, OUTPUT);
+  digitalWrite(BOARD_SDMMC_POWER_PIN, BOARD_SDMMC_POWER_ON_LEVEL);
+  delay(50);
+}
 
 static bool trySd(const SdPinSet &p, bool oneBit, int freq) {
   SD_MMC.end();
@@ -189,6 +236,7 @@ static void sweepSd() {
   Serial.println("\n--- 5. microSD (SDIO / SDMMC) ---");
   Serial.println("  The P4 board has a 4-bit SDIO slot, so this should be much");
   Serial.println("  faster than the S3 dongle's plain SPI card.");
+  sdPowerOn();
 
   const int freqs[] = {SDMMC_FREQ_HIGHSPEED, SDMMC_FREQ_DEFAULT, SDMMC_FREQ_PROBING};
 
