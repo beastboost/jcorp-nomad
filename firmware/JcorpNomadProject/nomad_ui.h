@@ -39,6 +39,27 @@ int  NomadUI_PageCount(void);
 // reboot or block, where the normal LVGL task will not get another turn.
 void NomadUI_Flush(void);
 
+// Flip the panel 180 degrees and repaint. Writing MADCTL leaves whatever is
+// already in panel RAM mirrored, so this always repaints rather than leaving
+// the caller to remember.
+void NomadUI_SetRotation(bool flip180);
+
+// Boot finished: drop the status overlay and stop the spinner. Separate from
+// ClearMessage because it also retires the boot spinner, which otherwise
+// redraws forever.
+void NomadUI_BootComplete(void);
+
+// Pump the UI. Called from the main loop; on a headless board it does nothing.
+void NomadUI_Tick(void);
+
+// Hold the UI across a batch of updates. The underlying LVGL mutex is
+// recursive, so the setters above may still be called inside. A caller that
+// gets false must not consume whatever it was about to display - the point of
+// taking the lock first is to leave the work queued for the next pass rather
+// than dropping it. Headless always succeeds.
+bool NomadUI_Lock(uint32_t timeoutMs);
+void NomadUI_Unlock(void);
+
 #ifdef __cplusplus
 }
 #endif

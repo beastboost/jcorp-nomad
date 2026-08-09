@@ -4,6 +4,9 @@
 #include <string.h>
 #include "nomad_ui.h"
 #include "board_config.h"
+
+#if NOMAD_HAS_DISPLAY
+
 #include "Display_Driver.h"
 #include "LVGL_Driver.h"
 #include "ui.h"
@@ -54,6 +57,39 @@ void NomadUI_Flush(void) {
     }
     delay(6);
   }
+}
+
+void NomadUI_Tick(void) {
+  LvglGuard g(20);
+  if (!g) return;               // UI task mid-update; catch it next pass
+  lv_timer_handler();
+}
+
+// Recursive mutex, so the setters can be called inside a held lock.
+bool NomadUI_Lock(uint32_t timeoutMs) { return Lvgl_Lock(timeoutMs); }
+void NomadUI_Unlock(void) { Lvgl_Unlock(); }
+
+void NomadUI_SetRotation(bool flip180) {
+  LvglGuard g(200);
+  if (!g) return;
+  LCD_SetRotation180(flip180);
+  // MADCTL only changes how panel RAM is scanned out, so whatever was already
+  // drawn stays mirrored until it is painted again.
+  lv_obj_invalidate(lv_scr_act());
+  lv_timer_handler();
+}
+
+void NomadUI_BootComplete(void) {
+  LvglGuard g(200);
+  if (!g) return;
+  if (ui_MediaGen) {
+    lv_textarea_set_text(ui_MediaGen, "");
+    lv_obj_add_flag(ui_MediaGen, LV_OBJ_FLAG_HIDDEN);
+  }
+  // The boot spinner animates forever if it is left visible, which on a
+  // partial-refresh panel means never-ending SPI traffic.
+  if (ui_Spinner1) lv_obj_add_flag(ui_Spinner1, LV_OBJ_FLAG_HIDDEN);
+  lv_timer_handler();
 }
 
 void NomadUI_Message(const char *text) {
@@ -273,4 +309,92 @@ int NomadUI_GetPage(void) {
 void NomadUI_NextPage(void) {
 }
 
-#endif
+#endif  // layout
+
+#else  // !NOMAD_HAS_DISPLAY
+// =========================================================================
+// Headless boards (the ESP32-P4 dev board). No panel is fitted, so LVGL and
+// the display driver are not compiled at all - this is the whole reason the
+// firmware talks to the screen through NomadUI_* instead of poking widgets.
+//
+// The status the panel used to carry - SSID, IP, client count, SD state - is
+// all in the web UI already. What is genuinely useful without a screen is
+// seeing it during boot, before the web server is up, so the values that
+// change rarely go to serial once each. The polled setters stay silent; they
+// are called several times a second and would drown the log.
+// =========================================================================
+
+void NomadUI_Init(void) {
+  Serial.println("[UI] headless build - no panel on this board");
+}
+
+void NomadUI_Flush(void) {}
+void NomadUI_Tick(void) {}
+bool NomadUI_Lock(uint32_t timeoutMs) { (void)timeoutMs; return true; }
+void NomadUI_Unlock(void) {}
+void NomadUI_SetRotation(bool flip180) { (void)flip180; }
+void NomadUI_BootComplete(void) {}
+void NomadUI_ClearMessage(void) {}
+
+void NomadUI_Message(const char *text) {
+  if (text && *text) Serial.printf("[UI] %s\n", text);
+}
+
+// Print only on change: these are polled, and an unchanged value every 500 ms
+// would make the serial log useless for anything else.
+void NomadUI_SetSSID(const char *ssid) {
+  static char last[40] = "";
+  if (!ssid || !strcmp(last, ssid)) return;
+  snprintf(last, sizeof(last), "%s", ssid);
+  Serial.printf("[UI] SSID: %s\n", ssid);
+}
+
+void NomadUI_SetIP(const char *ip) {
+  static char last[24] = "";
+  if (!ip || !strcmp(last, ip)) return;
+  snprintf(last, sizeof(last), "%s", ip);
+  Serial.printf("[UI] IP: %s\n", ip);
+}
+
+void NomadUI_SetUsers(int count) {
+  static int last = -1;
+  if (count == last) return;
+  last = count;
+  Serial.printf("[UI] clients: %d\n", count);
+}
+
+void NomadUI_SetWifiOk(bool ok) {
+  static int last = -1;
+  if ((int)ok == last) return;
+  last = (int)ok;
+  Serial.printf("[UI] wifi: %s\n", ok ? "up" : "down");
+}
+
+void NomadUI_SetSdOk(bool ok) {
+  static int last = -1;
+  if ((int)ok == last) return;
+  last = (int)ok;
+  Serial.printf("[UI] sd: %s\n", ok ? "mounted" : "absent");
+}
+
+void NomadUI_SetSdUsage(int percent, uint64_t usedBytes, uint64_t totalBytes) {
+  static int last = -1;
+  if (percent == last) return;
+  last = percent;
+  Serial.printf("[UI] sd usage: %d%% (%llu of %llu MB)\n", percent,
+                (unsigned long long)(usedBytes / (1024ULL * 1024ULL)),
+                (unsigned long long)(totalBytes / (1024ULL * 1024ULL)));
+}
+
+void NomadUI_SetSysStats(uint32_t freeHeapKB, uint32_t freePsramKB, float tempC,
+                         uint32_t uptimeSec) {
+  (void)freeHeapKB; (void)freePsramKB; (void)tempC; (void)uptimeSec;
+}
+
+// No screen, so no pages to cycle. A short press on the boot button does
+// nothing here; the long press still enters USB mass-storage mode.
+void NomadUI_NextPage(void) {}
+int  NomadUI_GetPage(void) { return 0; }
+int  NomadUI_PageCount(void) { return 0; }
+
+#endif  // NOMAD_HAS_DISPLAY

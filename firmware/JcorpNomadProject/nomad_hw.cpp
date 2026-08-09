@@ -73,10 +73,12 @@ NomadSdMountResult NomadSD_Mount(uint8_t maxOpenFiles) {
     NomadSD.end();
     delay(20);
 
+#if !NOMAD_SD_USE_DEFAULT_PINS
     if (!NomadSD.setPins(SD_CLK_PIN, SD_CMD_PIN, SD_D0_PIN, SD_D1_PIN, SD_D2_PIN, SD_D3_PIN)) {
       Serial.println("[SD] setPins() rejected the board_config.h pin map");
       return r;
     }
+#endif
 
     // format_if_mount_failed stays false on purpose: a bad mount must never
     // wipe somebody's media library.
@@ -169,6 +171,7 @@ void NomadHW_PrintBoardInfo(Stream &out) {
     out.println("PSRAM         : not detected  <-- enable OPI PSRAM in the board menu");
   }
   out.printf("Free heap     : %lu KB\n", (unsigned long)(ESP.getFreeHeap() / 1024));
+#if NOMAD_HAS_DISPLAY
   out.printf("LCD           : %dx%d, MOSI %d SCLK %d CS %d DC %d RST %d @ %lu Hz\n",
              LCD_WIDTH, LCD_HEIGHT, LCD_PIN_MOSI, LCD_PIN_SCLK, LCD_PIN_CS,
              LCD_PIN_DC, LCD_PIN_RST, (unsigned long)LCD_SPI_FREQ);
@@ -177,6 +180,9 @@ void NomadHW_PrintBoardInfo(Stream &out) {
              LCD_BL_ACTIVE_LEVEL ? "HIGH" : "LOW");
 #else
   out.println("Backlight     : hardwired on (no brightness control)");
+#endif
+#else
+  out.println("LCD           : none (headless build)");
 #endif
 #if NOMAD_SD_BUS == NOMAD_SD_BUS_SPI
   out.printf("SD (SPI)      : SCLK %d MOSI %d MISO %d CS %d, up to %lu MHz\n",

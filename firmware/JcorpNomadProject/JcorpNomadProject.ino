@@ -12,9 +12,11 @@
 #include <map>
 #include <time.h>
 #include "board_config.h"
+#if NOMAD_HAS_DISPLAY
 #include "Display_Driver.h"
 #include "LVGL_Driver.h"
-#include "ui.h" 
+#include "ui.h"
+#endif
 #include "nomad_ui.h"
 #include "nomad_hw.h"
 #include "RGB_lamp.h"
@@ -89,20 +91,23 @@ static void lvglSendMsg(const char *text, bool show) {
   xQueueSend(lvglQueue, &m, pdMS_TO_TICKS(50));
 }
 
+// Drains the queue through the NomadUI_* API rather than poking widgets, so a
+// headless board compiles this unchanged - the calls simply go to serial.
 static void lvglDrainQueue() {
   if (!lvglQueue) return;
-  if (!Lvgl_Lock(20)) return;   // UI task mid-update; drain on the next pass
+  // Take the lock before touching the queue: if the UI task holds it we leave
+  // the messages queued for the next pass rather than dequeuing and dropping
+  // them. The lock is recursive, so the NomadUI_* calls below can re-take it.
+  if (!NomadUI_Lock(20)) return;
   LvglMsg msg;
   bool drainedAny = false;
   bool endedHidden = false;
   while (xQueueReceive(lvglQueue, &msg, 0) == pdTRUE) {
     if (msg.show) {
-      lv_obj_clear_flag(ui_MediaGen, LV_OBJ_FLAG_HIDDEN);
-      lv_textarea_set_text(ui_MediaGen, msg.text);
+      NomadUI_Message(msg.text);
       endedHidden = false;
     } else {
-      lv_textarea_set_text(ui_MediaGen, "");
-      lv_obj_add_flag(ui_MediaGen, LV_OBJ_FLAG_HIDDEN);
+      NomadUI_ClearMessage();
       endedHidden = true;
     }
     drainedAny = true;
@@ -110,13 +115,10 @@ static void lvglDrainQueue() {
   //only redraws the screen after all updates are done, removed the spinner (reloading constantly.. whoops lol)
   if (drainedAny) {
     // if we just hid the overlay, redraw twice so no remnant is left behind
-    if (endedHidden) {
-      lv_obj_invalidate(lv_scr_act());
-      lv_timer_handler();
-    }
-    lv_timer_handler();
+    if (endedHidden) NomadUI_Tick();
+    NomadUI_Tick();
   }
-  Lvgl_Unlock();
+  NomadUI_Unlock();
 }
 
 static volatile bool bootButtonPressed = false;
@@ -1392,8 +1394,10 @@ void RGB_SetColor(uint8_t r, uint8_t g, uint8_t b) {
     // colour picked in the admin page.
     Set_Color(r, g, b);
 }
+#if NOMAD_HAS_DISPLAY
 extern lv_obj_t *ui_wifi;
 extern lv_obj_t *ui_SDcard;
+#endif
 bool lastWifiStatus = false;
 bool lastSDStatus = false;
 //Globals for SD scan
@@ -4330,12 +4334,9 @@ Serial.println("SD Card initialized successfully!");
     applyWiFiSettings();
     applyRGBSettings();
     if (settings.flipScreen) {
-      // setup() is still single-threaded here (LVGL tasks not started yet),
-      // so writing MADCTL directly is safe. Repaint so the boot screen
-      // isn't left mirrored from the pre-flip draws above.
-      LCD_SetRotation180(true);
-      lv_obj_invalidate(lv_scr_act());
-      lv_timer_handler();
+      // Repaint so the boot screen isn't left mirrored from the pre-flip
+      // draws above; NomadUI_SetRotation does the invalidate for us.
+      NomadUI_SetRotation(true);
     }
     NomadUI_SetSSID(settings.wifiSSID.c_str());
     NomadUI_SetIP(WiFi.softAPIP().toString().c_str());
@@ -5986,10 +5987,7 @@ server.on("/auth/logout", HTTP_POST, [](AsyncWebServerRequest *request){
 // slightest contact bounce, dropping the server mid-stream.
 // Start the web server
   server.begin();
-  lv_textarea_set_text(ui_MediaGen, "");
-  lv_obj_add_flag(ui_MediaGen, LV_OBJ_FLAG_HIDDEN);
-  if (ui_Spinner1) lv_obj_add_flag(ui_Spinner1, LV_OBJ_FLAG_HIDDEN); // boot complete, stop the perpetual redraw
-  lv_timer_handler();
+  NomadUI_BootComplete();   // drop the overlay and retire the boot spinner
   updateToggleStatus(); // Reflect initial WiFi and SD status
   webLog("[SYSTEM] Web server started - ready to accept connections", "success");
   {
@@ -6002,10 +6000,11 @@ server.on("/auth/logout", HTTP_POST, [](AsyncWebServerRequest *request){
 
         if (lcdRotatePending) {
           lcdRotatePending = false;
-          LCD_SetRotation180(settings.flipScreen);
-          lv_obj_invalidate(lv_scr_act());  // panel RAM shows mirrored until fully repainted
+          NomadUI_SetRotation(settings.flipScreen);
         }
+#if NOMAD_HAS_DISPLAY
         Timer_Loop();
+#endif
 
         // RGB updates are time-sensitive for visual smoothness
         if (currentLEDMode == 1) {
@@ -6131,7 +6130,9 @@ void loop() {
       ESP.restart();
     }
     dnsServer.processNextRequest();
+#if NOMAD_HAS_DISPLAY
     Timer_Loop();
+#endif
 
     if (currentLEDMode == 1) {
         RGB_Lamp_Loop(20);   // hue step every 20 ms

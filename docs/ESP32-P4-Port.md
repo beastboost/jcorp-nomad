@@ -1,8 +1,10 @@
 # Porting Nomad to the ESP32-P4 (Guition JC-ESP32P4-M3-DEV)
 
-Status: **groundwork only.** Nothing here has run on hardware. The board profile
-builds and the probe sketch exists; the port itself is not started, deliberately,
-because one unknown decides whether it is worth doing at all.
+Status: **headless port written, not yet run on hardware.** The board profile,
+the headless UI path and the probe sketch are in. Nothing has touched real
+silicon — the board has not shipped, and this repo's CI cannot reach Espressif's
+toolchain host, so the firmware has been verified by preprocessing all four
+board profiles rather than by compiling.
 
 ---
 
@@ -24,13 +26,17 @@ running plain SPI; 4-bit SDIO is a different class of thing. The USB host port i
 what you were really after — an external drive would lift the storage ceiling
 completely.
 
-## The one thing that decides it
+## Wi-Fi comes from the C6
 
-**The ESP32-P4 has no radio.** Wi-Fi comes from the on-board ESP32-C6 over
-SDIO, using ESP-Hosted. Nomad is a captive portal and nothing else — every
-feature is reached through `WiFi.softAP()`, `DNSServer`, `AsyncWebServer`, and
-`WiFi.softAPgetStationNum()`. If SoftAP over the hosted link is not solid, there
-is no Nomad on this board, and no amount of porting changes that.
+The P4 has no radio; the on-board ESP32-C6 provides it over SDIO using
+ESP-Hosted. This is Espressif's designed and supported arrangement for the
+part — the C6 ships pre-flashed and the Arduino core builds for it — so it is
+not exotic, and it is not a reason to hold off porting.
+
+The one thing to check early is that **SoftAP** specifically works, since Nomad
+is a captive portal and nothing else: `WiFi.softAP()`, `DNSServer`,
+`AsyncWebServer`, `WiFi.softAPgetStationNum()`. Station mode gets far more
+testing than SoftAP does.
 
 What is known:
 
@@ -41,18 +47,17 @@ What is known:
   station-only by design.
 * P4 support has been in the Arduino core since 3.1.0 (ESP-IDF 5.3).
 
-What is not known, and cannot be settled from a desk:
+Worth checking on arrival, none of which blocks the port:
 
-* Whether SoftAP over hosted is *reliable*. Association problems on P4+C6 over
-  SDIO are actively reported, e.g.
-  [esphome/esphome#10956](https://github.com/esphome/esphome/issues/10956).
-* Whether the C6's pre-flashed slave firmware matches what a current Arduino core
-  expects. Boards ship ESP-Hosted slave **v0.0.6**; newer cores want newer, and
-  the mismatch is reported as a version warning followed by a link that does not
-  work. Fixing it means flashing the C6 separately, through its own USB port.
-* This board's **SD pin map**. It is not in any datasheet I could verify.
-
-So: probe first, port second.
+* Whether the C6's pre-flashed slave firmware matches what a current Arduino
+  core expects. Boards ship ESP-Hosted slave **v0.0.6**; newer cores want newer,
+  and the mismatch shows up as a version warning followed by a link that does
+  not work. The fix is flashing the C6 separately, through its own USB port.
+* SoftAP stability. Association problems on P4+C6 over SDIO get reported (e.g.
+  [esphome/esphome#10956](https://github.com/esphome/esphome/issues/10956)),
+  though mostly against station mode.
+* This board's **SD pin map**, which is not in any datasheet I could verify.
+  The profile currently lets the core use its own SDMMC defaults.
 
 ## Run this first
 
@@ -74,43 +79,82 @@ It prints a verdict at the end. Step 5 sweeps rather than assumes: the S3 port
 started with a guessed pin map that was wrong on every pin, and that is not a
 mistake worth repeating.
 
-## What the port looks like, once the probe passes
+## The headless port (done)
 
-**Run it headless.** No panel is fitted, and that is a feature — the display
-layer was the bulk of the S3 port (`Display_Driver`, LVGL, SquareLine UI,
-`ui_screen_mini.c`), and on this board all of it drops out. Nomad's screen only
-ever showed the SSID, the IP and a client count, all of which the web UI already
-has. A fourth `NOMAD_LCD_NONE` profile is much less work than a DSI driver.
+No panel is fitted, and that turns out to be a feature. The display layer was the
+bulk of the S3 port — `Display_Driver`, `LVGL_Driver`, the SquareLine UI,
+`ui_screen_mini.c` — and on this board all of it compiles out. Nomad's screen
+only ever showed SSID, IP, client count and SD usage, every one of which the web
+UI already has.
 
-Ordered by effort, smallest first:
+`NOMAD_HAS_DISPLAY` is the switch. It defaults to 1, so only a profile with no
+panel opts out and adding a board cannot silently lose its screen.
 
-1. **`board_config.h` profile** — `NOMAD_BOARD_P4_DEV 4`, SD pins from the
-   probe, `NOMAD_SD_BUS_SDMMC`, no LCD, no LED.
-2. **Compile-guard the display** — `#if NOMAD_HAS_DISPLAY` around the LVGL init,
-   the tick handler and the `NomadUI_*` calls. They are already funnelled through
-   a small set of functions, so this is narrow.
-3. **Check the RISC-V build** — the S3 code is plain C++ and should port, but
-   LVGL ships Xtensa assembly optimisations that must be off.
-4. **USB mass-storage mode** — the S3 exposes the card over TinyUSB when you hold
-   the button. On the P4 with hwcdc this needs rechecking, and the board has no
-   equivalent button.
-5. **USB host / external drive** — the interesting one, and the least ready.
+What changed:
+
+* **`board_config.h`** — `NOMAD_BOARD_P4_DEV 4`, `NOMAD_UI_HEADLESS` layout,
+  `NOMAD_SD_BUS_SDMMC`, no LCD, no LED.
+* **`nomad_ui.cpp`** — a second implementation of the same 19-function API.
+  Values that change rarely (SSID, IP, client count, SD state) print to serial
+  once each; the polled ones stay quiet so the log survives. This is the payoff
+  for the firmware talking to the screen through `NomadUI_*` rather than poking
+  widgets.
+* **Four new API calls** — `NomadUI_SetRotation`, `NomadUI_BootComplete`,
+  `NomadUI_Tick`, `NomadUI_Lock`/`Unlock`. The `.ino` had ~22 raw `lv_*`/`LCD_*`
+  calls left over; these absorbed them, so the sketch no longer names LVGL at
+  all except behind one guard.
+* **`Display_Driver.cpp` / `LVGL_Driver.cpp`** wrapped in `#if
+  NOMAD_HAS_DISPLAY`. Arduino compiles every file in the sketch folder, so
+  without this a headless build still tries to compile them and fails on the
+  `LCD_PIN_*` macros that do not exist. `ui_Screen1.c` and `ui_screen_mini.c`
+  were already gated on `NOMAD_UI_LAYOUT` and need nothing.
+
+One subtlety worth recording. The queue drain used to hold the LVGL lock across
+the whole batch and skip draining entirely if it could not get it, so messages
+stayed queued rather than being dropped. Routing it through `NomadUI_Message`
+would have dequeued first and dropped on a failed lock. `NomadUI_Lock`/`Unlock`
+preserve the original ordering — the mutex is recursive, so the setters can
+still take it inside.
+
+## Still to do
+
+1. **Check the RISC-V build.** The S3 code is plain C++ and should port, but
+   LVGL ships Xtensa assembly optimisations that must be off. Headless does not
+   compile LVGL at all, so this only matters if a DSI panel is added later.
+2. **USB mass-storage mode.** The S3 exposes the card over TinyUSB on a long
+   button press. On the P4 with hwcdc this needs rechecking.
+3. **USB host / external drive** — the interesting one, and the least ready.
    The P4 has the hardware, but reading a USB drive needs the ESP-IDF USB host
-   MSC class, which the Arduino core does not usefully expose today. Treat it as
-   a research task, not a port task.
+   MSC class, which the Arduino core does not usefully expose today. A research
+   task, not a port task.
+4. **Ethernet.** Free bonus on this board; a Nomad that can also sit on a wired
+   LAN is more useful than one that cannot.
 
 Ethernet is a free bonus worth taking later: a Nomad that can also sit on a wired
 LAN is genuinely more useful than one that cannot.
 
-## What exists now
+## Building it
 
-* `firmware/NomadP4Probe/NomadP4Probe.ino` — the probe described above
-* `tools/nomad_setup/boards.py` — `p4-dev` profile, FQBN
-  `esp32:esp32:esp32p4` with `PSRAM=enabled` (the P4 has no opi/qspi choice) and
-  `app3M_fat9M_16MB`
-* The pre-flash check is no longer hardcoded to the S3. It takes the expected
-  chip from the board profile, so an S3 build cannot be written to a P4 or the
-  reverse — different ISAs, and the failure would be baffling.
+```
+nomad-setup flash --board p4-dev
+```
 
-Not written: any `board_config.h` entry. That waits for the probe to report real
-pins.
+FQBN `esp32:esp32:esp32p4` with `PSRAM=enabled` (the P4 has no opi/qspi choice)
+and `app3M_fat9M_16MB`. The pre-flash check is no longer hardcoded to the S3 —
+it takes the expected chip from the board profile, so an S3 build cannot be
+written to a P4 or the reverse. Different ISAs; that failure would be baffling
+on the bench.
+
+## How this was verified without hardware
+
+Neither the board nor an ESP32 toolchain is available here, so instead: every
+`board_config.h` macro referenced in code the preprocessor actually keeps was
+resolved against all four profiles, using `gcc -E -fdirectives-only` so that
+`#if`-excluded regions do not produce false alarms. All four come out clean.
+Separately, all 19 functions declared in `nomad_ui.h` are confirmed present in
+both the display and headless branches, and the `#if`/`#endif` counts balance in
+every file touched.
+
+That catches the failure this port is most prone to — a macro or function that
+only exists on one profile — but it is not a compile, and it is certainly not a
+boot.

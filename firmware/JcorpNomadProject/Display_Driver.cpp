@@ -15,6 +15,10 @@
  *****************************************************************************/
 #include "Display_Driver.h"
 
+// Arduino compiles every file in the sketch folder, so a headless board would
+// still build this one - and its LCD_PIN_* macros do not exist there.
+#if NOMAD_HAS_DISPLAY
+
 static SPIClass LCDspi(FSPI);
 static uint8_t s_backlightPercent = 0;
 
@@ -293,3 +297,5 @@ void Set_Backlight(uint8_t Light) {
 uint8_t Get_Backlight(void) {
   return s_backlightPercent;
 }
+
+#endif  // NOMAD_HAS_DISPLAY
