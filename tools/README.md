@@ -34,7 +34,9 @@ tools\nomad-setup.bat               # same thing on Windows
 
 **SD card**
 
-* Lists removable disks only; the disk holding your OS is never offered
+* Lists removable disks only; the disk holding your OS is never offered.
+  Removability comes from the media type as well as the bus, so card readers
+  that present as SCSI or RAID are still recognised
 * Requires you to type `ERASE` before touching anything
 * Partitions and formats FAT32 — via `mkfs.vfat` on Linux, `diskutil` on macOS,
   `diskpart` on Windows

@@ -178,9 +178,10 @@ def find_esptool(explicit: Optional[str] = None,
         "  If it is installed, it is under a different Python than the one\n"
         "  running this tool. Installing it into this one always works:\n\n"
         f"      {hint}\n\n"
-        "  Or point straight at it:  --esptool C:\\path\\to\\esptool.exe\n"
-        "  Installing the ESP32 board package (arduino-cli --install-deps, or\n"
-        "  the Arduino IDE Boards Manager) also brings a copy."
+        "  Or point straight at it:  --esptool C:\\path\\to\\esptool.exe\n\n"
+        "  Easiest of all, if arduino-cli is installed: the ESP32 core ships an\n"
+        "  esptool, and this fetches it along with everything needed to build:\n\n"
+        "      nomad-setup flash --install-deps"
     )
 
 
