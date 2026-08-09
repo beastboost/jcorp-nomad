@@ -25,9 +25,24 @@
 #include "esp_wifi.h"
 #if defined(ARDUINO_ARCH_ESP32)
   #include "soc/soc.h"
-  #include "soc/rtc_cntl_reg.h"
+  // The RTC_CNTL block is an Xtensa-era peripheral. The ESP32-P4 replaced it
+  // with the LP/PMU subsystem and ships no soc/rtc_cntl_reg.h at all, so this
+  // has to be conditional or the P4 build dies on the first include.
+  #if __has_include("soc/rtc_cntl_reg.h")
+    #include "soc/rtc_cntl_reg.h"
+  #endif
   #include "esp_system.h"
   #include "esp_core_dump.h"
+#endif
+
+// Forcing the ROM download stub from software needs RTC_CNTL_OPTION1. Where it
+// does not exist there is no equivalent one-liner - but nor is it needed: the
+// boards without it (the P4 dev board) have real boot and reset buttons, which
+// is exactly what the S3 dongle lacks and why this trick exists there.
+#if defined(RTC_CNTL_OPTION1_REG) && defined(RTC_CNTL_FORCE_DOWNLOAD_BOOT)
+  #define NOMAD_CAN_FORCE_DOWNLOAD 1
+#else
+  #define NOMAD_CAN_FORCE_DOWNLOAD 0
 #endif
 #include "usb_mode.h"
 #include "boot_mode.h" // library for firmware switching
@@ -49,11 +64,17 @@ String humanSize(size_t bytes);
 void launch_usb_mode() {
 extern void usb_setup();
 extern void usb_loop();
+#if NOMAD_HAS_USB_MSC
   usb_setup();
 
   for (;;) {
     usb_loop();
   }
+#else
+  // No mass-storage stack on this board. Returning is important: the loop above
+  // never exits, so calling it with stubs would hang instead of booting.
+  Serial.println("[USB] mass-storage mode is not built for this board");
+#endif
 }
 // BOOT_BUTTON_PIN comes from board_config.h
 #include <vector>
@@ -4170,15 +4191,22 @@ void setup() {
 
     if (get_boot_mode() == USB_MODE) {
       clear_boot_mode();    // next boot will go back to MEDIA
+#if NOMAD_HAS_USB_MSC
       delay(500);
       Serial.println(">>> USB mode: mounting SD & starting MSC");
       NomadUI_Init();
       btStop(); //Stops bluetooth (dont need)
       NomadUI_Message("USB Mass-Storage Mode\n\nEject or press the button\nto return to media mode");
       NomadUI_Flush();
-      
+
       launch_usb_mode();
       return;
+#else
+      // Nothing to enter here, and falling through to a normal boot is the only
+      // sane outcome - returning would leave the board booted into nothing.
+      Serial.println(">>> USB mass-storage mode is not built for this board;"
+                     " booting normally.");
+#endif
     }
 
 
@@ -5962,12 +5990,15 @@ server.on("/auth/logout", HTTP_POST, [](AsyncWebServerRequest *request){
       NomadUI_Flush();
       NomadUI_Flush();
 
-  #if defined(ARDUINO_ARCH_ESP32)
+  #if defined(ARDUINO_ARCH_ESP32) && NOMAD_CAN_FORCE_DOWNLOAD
       Serial.println(">>> Writing force-download flag and restarting (RTC_CNTL_FORCE_DOWNLOAD_BOOT).");
       REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
       esp_restart(); // low-level restart into ROM download mode
   #else
-      Serial.println(">>> Platform fallback: set_boot_mode(FLASH_MODE) and restart.");
+      // No software route into the ROM stub on this part. Say what to do by
+      // hand rather than restarting into the same firmware and looking broken.
+      Serial.println(">>> This chip has no software force-download. Hold BOOT and");
+      Serial.println(">>> tap RESET to enter download mode, then flash as usual.");
       set_boot_mode(FLASH_MODE);
       ESP.restart();
   #endif

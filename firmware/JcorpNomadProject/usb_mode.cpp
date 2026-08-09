@@ -6,6 +6,9 @@
 // server mode.
 
 #include "board_config.h"
+
+#if NOMAD_HAS_USB_MSC
+
 #include "boot_mode.h"      // for set_boot_mode()/MEDIA_MODE
 #include "nomad_hw.h"
 #include "RGB_lamp.h"
@@ -139,3 +142,15 @@ void usb_loop() {
     }
   }
 }
+
+#else  // !NOMAD_HAS_USB_MSC
+// This board does not do mass-storage mode - see board_config.h. Stubs, so the
+// callers need no guards of their own.
+#include <Arduino.h>
+
+// Only the two functions usb_mode.h declares. launch_usb_mode() lives in the
+// .ino and must not be defined twice.
+void usb_setup(void) {}
+void usb_loop(void) {}
+
+#endif  // NOMAD_HAS_USB_MSC
