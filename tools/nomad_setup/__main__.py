@@ -485,6 +485,47 @@ def _doctor_next_step(state: dict) -> None:
         c.warn("Use an Administrator prompt so the card step can format.")
 
 
+def cmd_monitor(args) -> int:
+    """Watch the board's serial output.
+
+    Reading the log is the only way to tell a board that is not running from one
+    that is running and unhappy, and 'which port, which baud' is exactly the
+    friction that stops people doing it.
+    """
+    import subprocess
+
+    board = boards.BOARDS[args.board]
+    c.heading("Serial monitor")
+    port = _pick_port(args)
+    baud = args.monitor_baud
+
+    cli = build.find_arduino_cli(getattr(args, "arduino_cli", None))
+    if not cli:
+        c.error("arduino-cli not found; it provides the serial monitor.")
+        c.info(build.install_hint())
+        c.info(f"Or use any terminal at {baud} baud on {port}.")
+        return 1
+
+    c.ok(f"{port} at {baud} baud - Ctrl+C to stop")
+    if not board.options.get("CDCOnBoot", "default").startswith("cdc"):
+        c.info(c.dim("Serial is on UART0, which is the same port you flash on."))
+    else:
+        c.info(c.dim("This board puts Serial on its native USB port, which may "
+                     "be a different socket from the one you flash on."))
+
+    cmd = [cli.path, "monitor", "-p", port, "-c", f"baudrate={baud}"]
+    if args.dry_run:
+        c.info(c.dim("[dry-run] " + " ".join(cmd)))
+        return 0
+    try:
+        return subprocess.call(cmd)
+    except KeyboardInterrupt:
+        return 0
+    except OSError as exc:
+        c.error(str(exc))
+        return 1
+
+
 def cmd_erase(args) -> int:
     """Wipe the whole flash and stop there.
 
@@ -737,6 +778,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="verify the FAT32 formatter and the pre-flash checks offline"
                    ).set_defaults(func=selftest.cmd_selftest)
 
+    p_mon = sub.add_parser("monitor", parents=[common, fw_opts],
+                           help="watch the board's serial output")
+    p_mon.add_argument("--monitor-baud", type=int, default=115200,
+                       help="serial monitor speed (default: 115200)")
+    p_mon.set_defaults(func=cmd_monitor)
+
     sub.add_parser("erase", parents=[common, fw_opts],
                    help="wipe the whole flash and stop (asks you to type ERASE)"
                    ).set_defaults(func=cmd_erase)
@@ -764,7 +811,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # No subcommand -> the guided path, which is what most people want.
     known = {"all", "sdcard", "flash", "doctor", "selftest", "repair-core",
-             "erase", "list-disks", "list-ports"}
+             "erase", "monitor", "list-disks", "list-ports"}
     if not argv or argv[0] not in known and argv[0] not in ("-h", "--help", "--version"):
         argv = ["all"] + argv
 

@@ -63,6 +63,7 @@ tools\nomad-setup.bat               # same thing on Windows
 | `nomad-setup selftest` | Verify the FAT32 formatter and the pre-flash checks offline |
 | `nomad-setup flash` | Build (or take prebuilt binaries) and write to the board |
 | `nomad-setup sdcard` | Format a card and copy the Nomad files onto it |
+| `nomad-setup monitor` | Watch the board's serial output on the right port |
 | `nomad-setup erase` | Wipe the whole flash and stop. Asks you to type `ERASE`. |
 | `nomad-setup repair-core` | Reinstall the ESP32 board package and clear the build caches |
 | `update.bat` | Fetch the latest code from GitHub (Windows) |
@@ -70,6 +71,26 @@ tools\nomad-setup.bat               # same thing on Windows
 
 Start with `doctor`. It reports what is installed, what is missing, and ends
 with the single command to run next.
+
+### Seeing what the board is doing
+
+```
+nomad-setup monitor --board p4-dev
+```
+
+Picks the port the same way `flash` does and opens it at 115200. This matters
+more than it sounds: a board that shows no Wi-Fi network is either not running
+or running and unhappy, and only the serial log tells you which.
+
+On the P4 dev board, `Serial` is deliberately left on **UART0**, so it comes out
+of the same USB-C socket you flash on. That board has three sockets — two wired
+straight to the P4's USB PHYs and one through a CH340C to UART0 — and only the
+CH340 one has DTR/RTS wired to `BOOTMODE`/`CHIP_PU`, so it is the only one that
+can auto-reset into download mode. Putting `Serial` on the native USB instead
+would send every boot message out of a socket you are not watching.
+
+The stick-shaped boards are the opposite case: they *are* a USB plug, so there
+is only one port and `Serial` goes over its native USB CDC.
 
 ### Wiping a board
 
