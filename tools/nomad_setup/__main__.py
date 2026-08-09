@@ -485,6 +485,57 @@ def _doctor_next_step(state: dict) -> None:
         c.warn("Use an Administrator prompt so the card step can format.")
 
 
+def cmd_erase(args) -> int:
+    """Wipe the whole flash and stop there.
+
+    `flash --erase` already does this, but only as a prelude to writing - so it
+    is no use when the build is broken, or when a board arrived with somebody
+    else's firmware on it and you want it gone before doing anything else.
+    """
+    board = boards.BOARDS[args.board]
+    c.heading("Erase flash")
+    c.info(f"Board: {board.name}")
+
+    # The copy bundled with the ESP32 core is the right one, so point the
+    # search at arduino-cli's data directory when it is available.
+    cli = build.find_arduino_cli(getattr(args, "arduino_cli", None))
+    tool = esp.find_esptool(args.esptool, cli.data_dir() if cli else None)
+    c.ok(f"esptool {tool.version}")
+
+    port = _pick_port(args)
+
+    # Probe first: erasing the wrong board is not recoverable from this side of
+    # the cable, and the chip name is the only independent check available.
+    try:
+        chip = esp.probe_chip(tool, port)
+        c.ok(f"{chip.label}, {chip.flash_mb} MB flash")
+        name = chip.chip.strip().upper()
+        if name and name != "UNKNOWN" and board.chip_match.upper() not in name:
+            c.error(f"That is a {chip.chip}, but --board {args.board} expects "
+                    f"a {board.chip_name}. Refusing to erase it.")
+            return 1
+    except esp.EspError as exc:
+        c.warn(str(exc).splitlines()[0])
+        c.warn("Continuing without confirming what is on the other end.")
+
+    print()
+    print(c.red(f"    Every byte of flash on {port} will be erased."))
+    print("    The firmware, saved settings and Wi-Fi name all go with it.")
+    print("    Nothing on the SD card is touched.")
+    print()
+    if not c.confirm_destructive(f"Erase the whole flash on {port}?", "ERASE"):
+        c.info("Cancelled.")
+        return 1
+
+    c.step("Erasing (this takes a minute or so on a 16 MB part)")
+    esp.erase_flash(tool, port, baud=args.baud, dry_run=args.dry_run,
+                    chip=board.esptool_chip)
+    c.ok("Flash erased")
+    c.info(f"The board is now blank. Write firmware with: "
+           f"{c.bold(_cli_name() + ' flash --board ' + args.board)}")
+    return 0
+
+
 def cmd_repair_core(args) -> int:
     """For when the board package installed but did not install correctly."""
     c.heading("Repairing the ESP32 board package")
@@ -655,6 +706,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="verify the FAT32 formatter and the pre-flash checks offline"
                    ).set_defaults(func=selftest.cmd_selftest)
 
+    sub.add_parser("erase", parents=[common, fw_opts],
+                   help="wipe the whole flash and stop (asks you to type ERASE)"
+                   ).set_defaults(func=cmd_erase)
+
     p_repair = sub.add_parser(
         "repair-core", parents=[common],
         help="reinstall the ESP32 board package and clear the build caches")
@@ -674,7 +729,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # No subcommand -> the guided path, which is what most people want.
     known = {"all", "sdcard", "flash", "doctor", "selftest", "repair-core",
-             "list-disks", "list-ports"}
+             "erase", "list-disks", "list-ports"}
     if not argv or argv[0] not in known and argv[0] not in ("-h", "--help", "--version"):
         argv = ["all"] + argv
 
