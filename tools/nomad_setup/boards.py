@@ -111,6 +111,32 @@ BOARDS: Dict[str, Board] = {
                "over ESP-Hosted. 32 MB PSRAM, 4-bit SDIO card slot, USB 2.0 HS. "
                "Unproven: run NomadP4Probe first."),
     ),
+    "p4-nano": Board(
+        key="p4-nano",
+        name="Waveshare ESP32-P4-NANO (ESP32-P4 + ESP32-C6)",
+        nomad_board=5,
+        fqbn="esp32:esp32:esp32p4",
+        options={
+            "PSRAM": "enabled",
+            # cdc here, unlike p4-dev, and the difference is the point. The
+            # Guition board has a CH340 bridge, so Serial belongs on UART0 where
+            # you flash. This board shows two USB-C sockets - one marked "USB
+            # Power", one "USB" - and no bridge chip in any photo, which means
+            # flashing and logging both go over the P4's native USB-Serial-JTAG.
+            # If it turns out to have a bridge after all, this is the one line
+            # to change, and the symptom is a board that flashes fine and then
+            # appears silent.
+            "CDCOnBoot": "cdc",
+            "USBMode": "hwcdc",
+            "DebugLevel": "none",
+        },
+        default_flash_mb=16,
+        chip_match="P4",
+        chip_name="ESP32-P4",
+        notes=("Headless, 4-bit SDIO card slot, Ethernet + PoE. Pins are the P4 "
+               "reference design, which Waveshare appear to follow - run "
+               "NomadP4Probe once to confirm."),
+    ),
 }
 
 DEFAULT_BOARD = "pocket-dongle"

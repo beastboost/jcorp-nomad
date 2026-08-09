@@ -26,6 +26,7 @@
 #define NOMAD_BOARD_POCKET_DONGLE_S3 2
 #define NOMAD_BOARD_TDONGLE_S3       3
 #define NOMAD_BOARD_P4_DEV           4
+#define NOMAD_BOARD_P4_NANO          5
 
 #ifndef NOMAD_BOARD
 #define NOMAD_BOARD NOMAD_BOARD_POCKET_DONGLE_S3
@@ -291,6 +292,60 @@
 //
 // Without a screen the short-press page cycle does nothing; the long-press USB
 // mass-storage mode still matters.
+#define BOOT_BUTTON_PIN 35
+
+// =========================================================================
+#elif NOMAD_BOARD == NOMAD_BOARD_P4_NANO
+// Waveshare ESP32-P4-NANO. Same silicon as the Guition board - ESP32-P4 with
+// an ESP32-C6-MINI over SDIO for the radio, 32 MB PSRAM, 16 MB flash - on a
+// board Waveshare actually document, with Ethernet and PoE.
+//
+// Sourcing, stated up front because it matters: I have not had this board on a
+// bench, and Waveshare's site is unreachable from where this was written. The
+// pins below are the ESP32-P4 *reference design*, which there is good reason to
+// think Waveshare follow: their own arduino-esp32 variant for the P4-POE-ETH
+// board is byte-identical to Espressif's generic esp32p4 variant through the
+// SDMMC, LDO and boot-strapping blocks. Cross-checked against ESP-IDF's
+// soc/esp32p4/sdmmc_pins.h and esp-bsp's P4 Function EV board.
+//
+// So: well-founded, not confirmed. Run firmware/NomadP4Probe first - it prints
+// the pins actually compiled in and mounts the card, which settles it in one
+// boot.
+#define NOMAD_BOARD_NAME "Waveshare ESP32-P4-NANO"
+
+// ---- display: none fitted -------------------------------------------------
+// There is a MIPI-DSI FPC connector but no panel in the box, so headless, same
+// as the other P4 board. If you fit a DSI panel this is where that changes.
+#define NOMAD_HAS_DISPLAY 0
+#define NOMAD_UI_LAYOUT   NOMAD_UI_HEADLESS
+
+// ---- no USB mass-storage mode --------------------------------------------
+// USBMSC needs the TinyUSB device stack, which is not what this profile builds,
+// and the card slot is on the board edge anyway.
+#define NOMAD_HAS_USB_MSC 0
+
+// ---- microSD: 4-bit SDIO 3.0 ---------------------------------------------
+// Waveshare advertise a 4-wire SDIO 3.0 slot. Leaving the pins to the core's
+// own defaults rather than naming them, because on a board that follows the
+// reference design those are the same numbers, and if this one does not then a
+// wrong hard-coded map is worse than none. The probe reports the truth.
+#define NOMAD_SD_BUS NOMAD_SD_BUS_SDMMC
+#define NOMAD_SD_USE_DEFAULT_PINS 1
+#define SD_CLK_PIN 43
+#define SD_CMD_PIN 44
+#define SD_D0_PIN  39
+#define SD_D1_PIN  40
+#define SD_D2_PIN  41
+#define SD_D3_PIN  42
+
+// ---- no addressable LED --------------------------------------------------
+#define NOMAD_LED_TYPE NOMAD_LED_NONE
+#define LED_PIN_DATA  -1
+#define LED_PIN_CLOCK -1
+
+// GPIO35 is the P4's BOOT_MODE strapping pin. This board also has USER and
+// RESET buttons; USER is not wired here because its GPIO is not documented
+// anywhere I could reach.
 #define BOOT_BUTTON_PIN 35
 
 #else

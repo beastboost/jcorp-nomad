@@ -219,6 +219,33 @@ still take it inside.
 Ethernet is a free bonus worth taking later: a Nomad that can also sit on a wired
 LAN is genuinely more useful than one that cannot.
 
+## The other P4 board: Waveshare ESP32-P4-NANO
+
+`--board p4-nano`. Same silicon — P4 with an ESP32-C6-MINI over SDIO, 32 MB
+PSRAM, 16 MB flash, a 4-wire SDIO 3.0 card slot — on a board Waveshare
+document, with Ethernet and PoE. PoE is a real advantage for something meant to
+sit powered on a shelf.
+
+Two differences from the Guition profile, both deliberate:
+
+* **`CDCOnBoot=cdc`.** The Guition board has a CH340 bridge, so `Serial` belongs
+  on UART0 where you flash. This board shows two USB-C sockets and no bridge
+  chip in any photo, so flashing and logging both go over the P4's native
+  USB-Serial-JTAG. If it turns out to have a bridge, that one option is the fix,
+  and the symptom is a board that flashes fine and then appears silent.
+* **`NOMAD_SD_USE_DEFAULT_PINS 1`.** The reference-design numbers are almost
+  certainly right, but on a board I have not seen, letting the core choose beats
+  a hard-coded map that might be wrong.
+
+Sourcing: the pins are the ESP32-P4 reference design, cross-checked against
+ESP-IDF's `soc/esp32p4/sdmmc_pins.h`, esp-bsp's P4 Function EV board, and
+Waveshare's own `waveshare_p4_poe_eth` Arduino variant — which is byte-identical
+to the generic `esp32p4` variant through the SDMMC, LDO and boot blocks, which
+is the reason to think Waveshare follow the reference on their P4 boards.
+Waveshare's own site is unreachable from this environment, so none of it is
+confirmed against *this* board's schematic. Run `NomadP4Probe` once and it
+settles in a single boot.
+
 ## Building it
 
 ```
