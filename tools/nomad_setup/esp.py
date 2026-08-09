@@ -54,9 +54,9 @@ class EspTool:
             return subprocess.CompletedProcess(cmd, 0, "", "")
         c.debug("$ " + " ".join(cmd))
         if stream:
-            proc = subprocess.run(cmd, text=True, timeout=timeout)
+            proc = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", timeout=timeout)
             return proc
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
 
 
 def _python_script_dirs() -> List[Path]:
@@ -153,9 +153,9 @@ def find_esptool(explicit: Optional[str] = None,
 
     for cmd in candidates:
         try:
-            proc = subprocess.run(cmd + ["version"], capture_output=True, text=True, timeout=60)
+            proc = subprocess.run(cmd + ["version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
             if proc.returncode != 0:
-                proc = subprocess.run(cmd + ["--version"], capture_output=True, text=True,
+                proc = subprocess.run(cmd + ["--version"], capture_output=True, text=True, encoding="utf-8", errors="replace",
                                       timeout=60)
             if proc.returncode == 0:
                 out = (proc.stdout or proc.stderr or "").strip().splitlines()
@@ -200,7 +200,7 @@ def list_serial_ports() -> List[Tuple[str, str]]:
             proc = subprocess.run(
                 ["powershell", "-NoProfile", "-Command",
                  "[System.IO.Ports.SerialPort]::GetPortNames()"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
             return [(p.strip(), "") for p in (proc.stdout or "").split() if p.strip()]
         except Exception:
