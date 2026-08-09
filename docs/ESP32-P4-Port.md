@@ -1,10 +1,20 @@
 # Porting Nomad to the ESP32-P4 (Guition JC-ESP32P4-M3-DEV)
 
-Status: **headless port written, not yet run on hardware.** The board profile,
-the headless UI path and the probe sketch are in. Nothing has touched real
-silicon — the board has not shipped, and this repo's CI cannot reach Espressif's
-toolchain host, so the firmware has been verified by preprocessing all four
-board profiles rather than by compiling.
+Status: **confirmed working on hardware.** `NomadP4Probe` came up on a real
+JC-ESP32P4-M3-DEV: SoftAP up, captive-portal stack serving, 32 MB PSRAM
+visible, microSD mounted 4-bit, client counter tracking a connected phone.
+
+```
+Nomad P4 probe
+The async web server works on this board.
+  * PSRAM: 32 MB
+  * SD: default pins, 4-bit
+  * Clients: 1
+```
+
+That settles the one open question. Wi-Fi over the C6 hosted link works, and
+**SoftAP specifically works** — which is all Nomad uses. The full firmware has
+not been run yet, but nothing structural stands in its way.
 
 ---
 

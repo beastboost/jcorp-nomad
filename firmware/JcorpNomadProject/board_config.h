@@ -246,6 +246,13 @@
 #define NOMAD_HAS_DISPLAY 0
 #define NOMAD_UI_LAYOUT   NOMAD_UI_HEADLESS
 
+// ---- no USB mass-storage mode --------------------------------------------
+// The dongle's party trick is being a USB-A plug you can hold a button on to
+// turn into a thumb drive. This board has a card slot on its edge and builds
+// with USBMode=hwcdc rather than the TinyUSB device stack USBMSC needs, so the
+// mode is compiled out. Pull the card, or use the web UI.
+#define NOMAD_HAS_USB_MSC 0
+
 // ---- microSD: 4-bit SDIO, confirmed against the schematic ----------------
 #define NOMAD_SD_BUS NOMAD_SD_BUS_SDMMC
 #define NOMAD_SD_USE_DEFAULT_PINS 0   // we know them; say so rather than infer
@@ -283,6 +290,15 @@
 // display says so explicitly, so adding a board cannot accidentally opt out.
 #ifndef NOMAD_HAS_DISPLAY
 #define NOMAD_HAS_DISPLAY 1
+#endif
+
+// USB mass-storage mode: hold the button and the board becomes a thumb drive.
+// That is the headline feature on a board shaped like a USB-A plug and close to
+// pointless on a dev board with a card slot on the edge, and it needs the
+// TinyUSB device stack, which is not what the P4 profile builds. On by default,
+// so a new stick-shaped board gets it without asking.
+#ifndef NOMAD_HAS_USB_MSC
+#define NOMAD_HAS_USB_MSC 1
 #endif
 
 // SDMMC boards normally name their pins; the P4 profile leaves them to the
