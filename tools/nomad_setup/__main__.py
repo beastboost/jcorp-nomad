@@ -281,7 +281,7 @@ def cmd_flash(args) -> int:
     # ---- verify before writing -------------------------------------------
     c.heading("Checks")
     plan = esp.load_flash_plan(artifacts)
-    result = esp.preflight(plan, chip)
+    result = esp.preflight(plan, chip, board)
 
     if result.app_partition and result.app_size:
         pct = result.app_size * 100 // result.app_partition.size

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from . import console as c
-from . import build, esp, fat32, sdcard
+from . import boards, build, esp, fat32, sdcard
 
 # Card sizes worth covering: each one lands in a different cluster-size band,
 # and the >32 GB ones are exactly what Windows refuses to format.
@@ -175,26 +175,32 @@ def _fake_build(directory: Path, app_bytes: int, app_part: int, flash_mb: int) -
 
 def run_preflight_tests() -> int:
     c.heading("Pre-flash checks")
+    s3 = boards.BOARDS["pocket-dongle"]
+    p4 = boards.BOARDS["p4-dev"]
     cases = [
-        # name,            app,       app0 size, built-for, chip flash, chip,      expect ok
-        ("healthy 16 MB",  1_450_000, 0x300000, 16, 16, "ESP32-S3", True),
-        ("app > partition", 1_450_000, 0x140000, 4, 4, "ESP32-S3", False),
-        ("built for bigger flash", 1_450_000, 0x300000, 16, 4, "ESP32-S3", False),
-        ("smaller build on big chip", 1_450_000, 0x300000, 4, 16, "ESP32-S3", True),
-        ("wrong chip family", 1_450_000, 0x300000, 16, 16, "ESP32-C3", False),
+        # name,            app,       app0 size, built-for, chip flash, chip,      board, expect ok
+        ("healthy 16 MB",  1_450_000, 0x300000, 16, 16, "ESP32-S3", s3, True),
+        ("app > partition", 1_450_000, 0x140000, 4, 4, "ESP32-S3", s3, False),
+        ("built for bigger flash", 1_450_000, 0x300000, 16, 4, "ESP32-S3", s3, False),
+        ("smaller build on big chip", 1_450_000, 0x300000, 4, 16, "ESP32-S3", s3, True),
+        ("wrong chip family", 1_450_000, 0x300000, 16, 16, "ESP32-C3", s3, False),
         # An unparseable chip name is our bug, not a wrong board: warn, allow.
-        ("chip name unreadable", 1_450_000, 0x300000, 16, 16, "", True),
+        ("chip name unreadable", 1_450_000, 0x300000, 16, 16, "", s3, True),
+        # The P4 is a different ISA entirely - crossing these must not be possible.
+        ("P4 build on a P4",     1_450_000, 0x300000, 16, 16, "ESP32-P4", p4, True),
+        ("P4 build on an S3",    1_450_000, 0x300000, 16, 16, "ESP32-S3", p4, False),
+        ("S3 build on a P4",     1_450_000, 0x300000, 16, 16, "ESP32-P4", s3, False),
     ]
 
     failures = 0
     rows = []
-    for name, app, part, built_mb, chip_mb, chip_name, expect_ok in cases:
+    for name, app, part, built_mb, chip_mb, chip_name, board, expect_ok in cases:
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             _fake_build(directory, app, part, built_mb)
             plan = esp.load_flash_plan(directory)
             result = esp.preflight(plan, esp.ChipInfo(chip=chip_name, flash_mb=chip_mb,
-                                                      psram_mb=8))
+                                                      psram_mb=8), board)
             passed = result.ok == expect_ok
             failures += 0 if passed else 1
             verdict = "allowed" if result.ok else "refused"

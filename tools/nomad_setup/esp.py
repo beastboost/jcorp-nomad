@@ -519,7 +519,8 @@ class PreflightResult:
         return not self.errors
 
 
-def preflight(plan: FlashPlan, chip: Optional[ChipInfo]) -> PreflightResult:
+def preflight(plan: FlashPlan, chip: Optional[ChipInfo],
+              board: Optional["boards.Board"] = None) -> PreflightResult:
     """Refuse combinations that would produce a board that does not boot."""
     result = PreflightResult()
 
@@ -578,18 +579,22 @@ def preflight(plan: FlashPlan, chip: Optional[ChipInfo]) -> PreflightResult:
     # Only block on a chip we positively identified as something else. Failing
     # to parse a name is a problem with our regexes, not evidence of the wrong
     # board, and it must not stand between a correct board and a flash.
+    want = (board.chip_match if board else "S3").upper()
+    want_name = board.chip_name if board else "ESP32-S3"
     if chip:
         name = chip.chip.strip().upper()
         if name and name != "UNKNOWN":
-            if "S3" not in name:
+            if want not in name:
                 result.errors.append(
-                    f"This firmware is for the ESP32-S3; the board reports '{chip.chip}'."
+                    f"This build is for the {want_name}; the board reports "
+                    f"'{chip.chip}'. Pass --board to match the hardware."
                 )
         else:
             result.warnings.append(
-                "Could not read the chip type from esptool's output, so the "
-                "ESP32-S3 check was skipped. Flash size and PSRAM did read back, "
-                "so the board is talking - run with --verbose to see the raw output."
+                f"Could not read the chip type from esptool's output, so the "
+                f"{want_name} check was skipped. Flash size and PSRAM did read "
+                "back, so the board is talking - run with --verbose for the raw "
+                "output."
             )
 
     if chip and chip.flash_mb and chip.psram_mb == 0:
