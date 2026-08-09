@@ -405,6 +405,48 @@ def run_recheck_tests() -> int:
     return failures
 
 
+def run_sketch_lint_tests() -> int:
+    """arduino-cli generates a prototype for every function in a .ino and
+    inserts them above the sketch's own declarations. A signature naming a
+    struct defined in that same .ino therefore fails to compile with
+    "'X' does not name a type" - a real error that shipped in two sketches.
+    Structs in local variables and arrays are fine; only signatures get hoisted.
+
+    Nothing here can compile ESP32 code, so this is the cheap stand-in.
+    """
+    import re
+
+    c.heading("Sketch lint (Arduino prototype hoisting)")
+    root = Path(__file__).resolve().parents[2] / "firmware"
+    sketches = sorted(root.glob("*/*.ino")) if root.is_dir() else []
+    if not sketches:
+        c.warn(f"No sketches found under {root}")
+        return 0
+
+    failures = 0
+    rows = []
+    for sketch in sketches:
+        text = sketch.read_text(encoding="utf-8", errors="replace")
+        local_types = set(re.findall(r"^\s*(?:typedef\s+)?struct\s+(\w+)\s*\{",
+                                     text, re.M))
+        bad = []
+        for num, line in enumerate(text.splitlines(), 1):
+            if re.match(r"^\s*(?://|\*|/\*)", line):
+                continue
+            m = re.match(r"^\s*(?:static\s+)?[\w:]+[\w\s:*&]*?\b\w+\s*\(([^)]*)", line)
+            if not m:
+                continue
+            for t in local_types:
+                if re.search(r"\b%s\b\s*[&*]" % re.escape(t), m.group(1)):
+                    bad.append(f"{num}: {t}")
+        failures += 1 if bad else 0
+        rows.append([sketch.parent.name, "FAIL" if bad else "PASS",
+                     str(len(local_types)), "; ".join(bad[:2]) if bad else ""])
+
+    c.table(["sketch", "result", "local structs", "hoisting hazard"], rows)
+    return failures
+
+
 def run_template_tests() -> int:
     """The required-files manifest is only useful if it matches the template
     actually shipped in the repo, so check the two against each other."""
@@ -460,6 +502,7 @@ def cmd_selftest(args) -> int:
     failures = (run_fat32_tests() + run_chip_probe_tests()
                 + run_preflight_tests() + run_diagnosis_tests()
                 + run_picker_tests() + run_port_tests() + run_recheck_tests()
+                + run_sketch_lint_tests()
                 + run_template_tests())
 
     c.heading("Result")

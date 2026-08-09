@@ -209,12 +209,15 @@ static const SdSpiPinSet kSdSpiCandidates[] = {
   {"GNPE Pocket-Dongle-S3", 17, 18, 16, 47},
 };
 
-static bool trySdSpi(const SdSpiPinSet &p, uint32_t freq) {
+// Scalar parameters, not `const SdSpiPinSet &`. arduino-cli hoists generated
+// prototypes above the sketch's own declarations, so a signature naming a
+// struct defined in this file fails with "does not name a type".
+static bool trySdSpi(int sclk, int mosi, int miso, int cs, uint32_t freq) {
   SD.end();
   sdSpi.end();
   delay(20);
-  sdSpi.begin(p.sclk, p.miso, p.mosi, p.cs);
-  if (!SD.begin(p.cs, sdSpi, freq, "/sdcard", 5, false /* never format */)) return false;
+  sdSpi.begin(sclk, miso, mosi, cs);
+  if (!SD.begin(cs, sdSpi, freq, "/sdcard", 5, false /* never format */)) return false;
   if (SD.cardType() == CARD_NONE) return false;
   return true;
 }
@@ -230,7 +233,7 @@ static void sdSweep() {
                   p.name, p.sclk, p.mosi, p.miso, p.cs);
 
     for (size_t f = 0; f < sizeof(freqs) / sizeof(freqs[0]); ++f) {
-      if (!trySdSpi(p, freqs[f])) continue;
+      if (!trySdSpi(p.sclk, p.mosi, p.miso, p.cs, freqs[f])) continue;
 
       Serial.printf("MOUNTED @ %lu MHz\n", (unsigned long)(freqs[f] / 1000000UL));
       Serial.printf("    card size : %.2f GB\n",
@@ -277,10 +280,12 @@ static const SdPinSet kSdCandidates[] = {
   {"ESP32-S3 devkit common",      36, 35, 37, 38, 33, 34},
 };
 
-static bool trySd(const SdPinSet &p, bool oneBit, int freq) {
+// Scalar parameters - see the note on trySdSpi above.
+static bool trySd(int clk, int cmd, int d0, int d1, int d2, int d3,
+                  bool oneBit, int freq) {
   SD_MMC.end();
   delay(20);
-  if (!SD_MMC.setPins(p.clk, p.cmd, p.d0, p.d1, p.d2, p.d3)) return false;
+  if (!SD_MMC.setPins(clk, cmd, d0, d1, d2, d3)) return false;
   if (!SD_MMC.begin("/sdcard", oneBit, false /* never format */, freq, 5)) return false;
   if (SD_MMC.cardType() == CARD_NONE) return false;
   return true;
@@ -309,10 +314,10 @@ static void sdSweep() {
     Serial.printf("  trying %-28s CLK %d CMD %d D0 %d D1 %d D2 %d D3 %d ... ",
                   p.name, p.clk, p.cmd, p.d0, p.d1, p.d2, p.d3);
 
-    bool ok = trySd(p, false, SDMMC_FREQ_HIGHSPEED);
+    bool ok = trySd(p.clk, p.cmd, p.d0, p.d1, p.d2, p.d3, false, SDMMC_FREQ_HIGHSPEED);
     const char *how = "4-bit 40 MHz";
-    if (!ok) { ok = trySd(p, false, SDMMC_FREQ_DEFAULT); how = "4-bit 20 MHz"; }
-    if (!ok) { ok = trySd(p, true,  SDMMC_FREQ_DEFAULT); how = "1-bit 20 MHz"; }
+    if (!ok) { ok = trySd(p.clk, p.cmd, p.d0, p.d1, p.d2, p.d3, false, SDMMC_FREQ_DEFAULT); how = "4-bit 20 MHz"; }
+    if (!ok) { ok = trySd(p.clk, p.cmd, p.d0, p.d1, p.d2, p.d3, true, SDMMC_FREQ_DEFAULT); how = "1-bit 20 MHz"; }
 
     if (!ok) {
       Serial.println("no");

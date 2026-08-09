@@ -222,10 +222,16 @@ static void sdPowerNote() {
 #endif
 }
 
-static bool trySd(const SdPinSet &p, bool oneBit, int freq) {
+// Scalar parameters, not `const SdPinSet &`, on purpose. arduino-cli generates
+// prototypes for every function in a .ino and inserts them above the sketch's
+// own declarations, so a signature naming a struct defined in the same file
+// fails with "'SdPinSet' does not name a type". Structs in local variables and
+// arrays are fine; only signatures get hoisted.
+static bool trySd(int clk, int cmd, int d0, int d1, int d2, int d3,
+                  bool oneBit, int freq) {
   SD_MMC.end();
   delay(20);
-  if (!SD_MMC.setPins(p.clk, p.cmd, p.d0, p.d1, p.d2, p.d3)) return false;
+  if (!SD_MMC.setPins(clk, cmd, d0, d1, d2, d3)) return false;
   // never format: a card that fails to mount must stay untouched
   if (!SD_MMC.begin("/sdcard", oneBit, false, freq, 5)) return false;
   return SD_MMC.cardType() != CARD_NONE;
@@ -257,7 +263,7 @@ static void sweepSd() {
       for (size_t f = 0; f < sizeof(freqs) / sizeof(freqs[0]); ++f) {
         Serial.printf("  trying %-18s %s @ %d kHz ... ",
                       p.name, oneBit ? "1-bit" : "4-bit", freqs[f]);
-        if (trySd(p, oneBit, freqs[f])) {
+        if (trySd(p.clk, p.cmd, p.d0, p.d1, p.d2, p.d3, oneBit, freqs[f])) {
           sdUp = true;
           sdHow = String(p.name) + (oneBit ? ", 1-bit" : ", 4-bit");
           Serial.println("MOUNTED");
