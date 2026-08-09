@@ -238,8 +238,9 @@ def cmd_flash(args) -> int:
             raise esp.EspError("dry run: not probing the board")
         c.step(f"Probing the board on {port}")
         chip = esp.probe_chip(tool, port)
-        c.ok(f"{chip.chip}, {chip.flash_mb} MB flash"
+        c.ok(f"{chip.label}, {chip.flash_mb} MB flash"
              + (f", {chip.psram_mb} MB PSRAM" if chip.psram_mb else ", no PSRAM reported"))
+        c.debug(chip.raw.strip())
         if chip.mac:
             c.info(f"MAC {chip.mac}")
     except esp.EspError as exc:

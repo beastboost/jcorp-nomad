@@ -220,38 +220,46 @@ def list_serial_ports() -> List[Tuple[str, str]]:
 
 @dataclass
 class ChipInfo:
-    chip: str = "unknown"
+    chip: str = ""            # "" means we could not tell, not "no chip"
     flash_mb: int = 0
     psram_mb: int = 0
     mac: str = ""
     features: str = ""
     raw: str = ""
 
+    @property
+    def label(self) -> str:
+        return self.chip or "chip type not reported"
+
 
 _FLASH_RE = re.compile(r"[Dd]etected flash size:\s*(\d+)\s*MB")
-_CHIP_RE = re.compile(r"Chip is\s+(\S+)")
 _MAC_RE = re.compile(r"MAC:\s*([0-9a-fA-F:]+)")
 _FEATURES_RE = re.compile(r"Features:\s*(.+)")
 _PSRAM_RE = re.compile(r"PSRAM\s*(\d+)\s*MB", re.IGNORECASE)
 
+# esptool renamed its chip banner in 5.0. 4.x printed one line:
+#     Chip is ESP32-S3 (revision v0.2)
+# 5.x prints two, and neither says "Chip is":
+#     Connected to ESP32-S3 on COM6:
+#     Chip type:          ESP32-S3 (QFN56) (revision v0.2)
+# Everything else we read - flash size, Features, MAC - kept its wording, so a
+# 5.x probe used to come back fully populated except for the chip name.
+_CHIP_RES = (
+    re.compile(r"Chip is\s+(\S+)"),                 # esptool 4.x
+    re.compile(r"Chip type:\s*(\S+)"),              # esptool 5.x
+    re.compile(r"Connected to\s+(ESP\S*)\s+on\b"),  # esptool 5.x banner
+)
 
-def probe_chip(tool: EspTool, port: str, baud: int = 115200) -> ChipInfo:
-    proc = tool.run(["--port", port, "--baud", str(baud), tool.sub("flash_id")], timeout=120)
-    out = (proc.stdout or "") + (proc.stderr or "")
+
+def parse_chip_output(out: str) -> ChipInfo:
+    """Pull what we can out of an esptool banner. Split out from probe_chip so
+    the self-test can check it against real output without a board attached."""
     info = ChipInfo(raw=out)
-
-    if proc.returncode != 0:
-        raise EspError(
-            f"Could not talk to the board on {port}.\n"
-            "  - Is it plugged in and not held open by a serial monitor?\n"
-            "  - These sticks have no reset button: hold the boot button while\n"
-            "    plugging it in to force download mode, then try again.\n\n"
-            + out.strip()
-        )
-
-    m = _CHIP_RE.search(out)
-    if m:
-        info.chip = m.group(1).rstrip(",")
+    for pattern in _CHIP_RES:
+        m = pattern.search(out)
+        if m:
+            info.chip = m.group(1).rstrip(",")
+            break
     m = _FLASH_RE.search(out)
     if m:
         info.flash_mb = int(m.group(1))
@@ -265,6 +273,22 @@ def probe_chip(tool: EspTool, port: str, baud: int = 115200) -> ChipInfo:
         if p:
             info.psram_mb = int(p.group(1))
     return info
+
+
+def probe_chip(tool: EspTool, port: str, baud: int = 115200) -> ChipInfo:
+    proc = tool.run(["--port", port, "--baud", str(baud), tool.sub("flash_id")], timeout=120)
+    out = (proc.stdout or "") + (proc.stderr or "")
+
+    if proc.returncode != 0:
+        raise EspError(
+            f"Could not talk to the board on {port}.\n"
+            "  - Is it plugged in and not held open by a serial monitor?\n"
+            "  - These sticks have no reset button: hold the boot button while\n"
+            "    plugging it in to force download mode, then try again.\n\n"
+            + out.strip()
+        )
+
+    return parse_chip_output(out)
 
 
 # ------------------------------------------------------------ flash plan --
@@ -391,10 +415,22 @@ def preflight(plan: FlashPlan, chip: Optional[ChipInfo]) -> PreflightResult:
                 f"has {chip.flash_mb} MB, so the extra space will go unused."
             )
 
-    if chip and chip.chip and "S3" not in chip.chip.upper():
-        result.errors.append(
-            f"This firmware is for the ESP32-S3; the board reports '{chip.chip}'."
-        )
+    # Only block on a chip we positively identified as something else. Failing
+    # to parse a name is a problem with our regexes, not evidence of the wrong
+    # board, and it must not stand between a correct board and a flash.
+    if chip:
+        name = chip.chip.strip().upper()
+        if name and name != "UNKNOWN":
+            if "S3" not in name:
+                result.errors.append(
+                    f"This firmware is for the ESP32-S3; the board reports '{chip.chip}'."
+                )
+        else:
+            result.warnings.append(
+                "Could not read the chip type from esptool's output, so the "
+                "ESP32-S3 check was skipped. Flash size and PSRAM did read back, "
+                "so the board is talking - run with --verbose to see the raw output."
+            )
 
     if chip and chip.flash_mb and chip.psram_mb == 0:
         result.warnings.append(
