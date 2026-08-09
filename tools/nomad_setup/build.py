@@ -326,6 +326,16 @@ def ensure_libraries(cli: ArduinoCli, install: bool, dry_run: bool = False) -> L
     return [n for n, _ in missing]
 
 
+def _sketch_uses_lvgl(sketch_dir: Path) -> bool:
+    for path in sorted(sketch_dir.glob("*.ino")) + sorted(sketch_dir.glob("*.h")):
+        try:
+            if "lvgl.h" in path.read_text(encoding="utf-8", errors="replace"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def ensure_lv_conf(cli: ArduinoCli, sketch_dir: Path, dry_run: bool = False) -> None:
     """LVGL looks for lv_conf.h one level above its own folder.
 
@@ -355,6 +365,11 @@ def ensure_lv_conf(cli: ArduinoCli, sketch_dir: Path, dry_run: bool = False) -> 
     source = sketch_dir / "lv_conf.h"
     target = lib_dir / "lv_conf.h"
     if not source.is_file():
+        # Only the main firmware uses LVGL. The bring-up sketches do not, and
+        # warning them about a file they have no use for is just noise.
+        if not _sketch_uses_lvgl(sketch_dir):
+            c.debug(f"{sketch_dir.name} does not use LVGL; skipping lv_conf.h")
+            return
         c.warn(f"{source} is missing from the sketch")
         return
 

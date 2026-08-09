@@ -598,11 +598,22 @@ def preflight(plan: FlashPlan, chip: Optional[ChipInfo],
             )
 
     if chip and chip.flash_mb and chip.psram_mb == 0:
-        result.warnings.append(
-            "The chip did not report any PSRAM. On an N16R8 that usually means "
-            "the module is a different variant - the firmware still runs, but "
-            "check the board menu if the display misbehaves."
-        )
+        # esptool reads PSRAM out of the chip's Features line, which not every
+        # target populates - the P4 carries its PSRAM in-package and reports
+        # nothing here. So this is only evidence of a problem on the parts where
+        # it is normally reported.
+        if want == "S3":
+            result.warnings.append(
+                "The chip did not report any PSRAM. On an N16R8 that usually "
+                "means the module is a different variant - the firmware still "
+                "runs, but check the board menu if the display misbehaves."
+            )
+        else:
+            result.warnings.append(
+                f"esptool reported no PSRAM. It does not read PSRAM on every "
+                f"target, so on the {want_name} this is expected and not a "
+                "fault; the sketch prints the real figure at boot."
+            )
 
     return result
 
