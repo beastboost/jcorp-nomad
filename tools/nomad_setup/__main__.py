@@ -336,14 +336,34 @@ def cmd_doctor(args) -> int:
     else:
         c.info("none detected")
 
-    c.heading("Removable disks")
+    # Show every disk, not just the ones we would offer, with the reason each is
+    # or is not selectable. "nothing detected" on its own is useless when you
+    # are looking straight at the card.
+    c.heading("Disks")
     try:
-        found = disks.list_disks(include_fixed=args.allow_fixed)
-        if found:
-            for d in found:
-                c.info(d.summary())
+        every = disks.list_disks(include_fixed=True)
+        offered = {d.identifier for d in disks.list_disks(include_fixed=False)}
+        if every:
+            rows = []
+            for d in every:
+                if d.identifier in offered:
+                    why = "offered"
+                elif not d.removable:
+                    why = "skipped: not removable (--allow-fixed to include)"
+                else:
+                    why = "skipped"
+                rows.append([d.identifier, c.human_bytes(d.size), d.description[:34], why])
+            c.table(["disk", "size", "model", "status"], rows)
         else:
-            c.info("none detected")
+            c.info("no disks reported at all")
+        if not offered:
+            c.warn("No card is selectable. Things to check:")
+            c.info("  - Is the microSD in a card reader that is plugged in?")
+            c.info("  - The Nomad stick itself cannot show you the card until the")
+            c.info("    firmware is flashed and it is booted into USB mass-storage")
+            c.info("    mode, so use a reader for the first setup.")
+            c.info("  - Some built-in readers report the card as a fixed disk;")
+            c.info("    'nomad-setup list-disks --allow-fixed' will show it.")
     except disks.DiskError as exc:
         c.error(str(exc))
 

@@ -59,34 +59,97 @@ class EspTool:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
+def _python_script_dirs() -> List[Path]:
+    """Where pip drops console scripts. On Windows these are routinely not on
+    PATH, which is why "pip install esptool" can succeed and esptool still be
+    invisible to shutil.which()."""
+    import site
+    import sysconfig
+
+    dirs: List[Path] = []
+
+    def add(value):
+        if value:
+            dirs.append(Path(value))
+
+    add(sysconfig.get_path("scripts"))
+    try:
+        add(sysconfig.get_path("scripts", f"{os.name}_user"))
+    except (KeyError, ValueError):
+        pass
+    try:
+        base = site.getuserbase()
+        add(Path(base) / ("Scripts" if os.name == "nt" else "bin"))
+    except AttributeError:
+        pass
+
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        localapp = os.environ.get("LOCALAPPDATA")
+        tag = f"Python{sys.version_info.major}{sys.version_info.minor}"
+        if appdata:
+            dirs.append(Path(appdata) / "Python" / tag / "Scripts")
+        if localapp:
+            dirs.append(Path(localapp) / "Programs" / "Python" / tag / "Scripts")
+    return dirs
+
+
 def find_esptool(explicit: Optional[str] = None,
                  arduino_data_dir: Optional[Path] = None) -> EspTool:
     candidates: List[List[str]] = []
+    looked: List[str] = []   # everything tried, so a failure can say where
+
+    def consider(cmd: List[str], note: str = "") -> None:
+        candidates.append(cmd)
+        looked.append(" ".join(cmd) + (f"   ({note})" if note else ""))
 
     if explicit:
-        candidates.append([explicit])
+        consider([explicit], "--esptool")
 
-    # The copy bundled with the installed ESP32 core is always the right
-    # version for the core that produced the binaries.
+    # The copy bundled with the installed ESP32 core is always the right version
+    # for the core that produced the binaries, so prefer it.
     search_roots = []
     if arduino_data_dir:
         search_roots.append(Path(arduino_data_dir))
-    search_roots += [
-        Path.home() / ".arduino15",
-        Path.home() / "Library" / "Arduino15",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Arduino15",
-    ]
-    for root in search_roots:
-        pattern = str(root / "packages" / "esp32" / "tools" / "esptool_py" / "*" / "esptool*")
-        for path in sorted(glob.glob(pattern), reverse=True):
-            if os.path.isfile(path) and os.access(path, os.X_OK):
-                candidates.append([path])
+    search_roots += [Path.home() / ".arduino15",
+                     Path.home() / "Library" / "Arduino15"]
+    for var in ("LOCALAPPDATA", "APPDATA"):
+        base = os.environ.get(var)
+        if base:                      # empty on non-Windows; skip rather than
+            search_roots.append(Path(base) / "Arduino15")   # build a relative path
 
-    candidates.append([sys.executable, "-m", "esptool"])
-    for name in ("esptool", "esptool.py"):
+    seen_roots = set()
+    for root in search_roots:
+        if not root.is_absolute() or str(root) in seen_roots:
+            continue
+        seen_roots.add(str(root))
+        pattern = str(root / "packages" / "esp32" / "tools" / "esptool_py" / "*" / "esptool*")
+        hits = sorted(glob.glob(pattern), reverse=True)
+        if not hits:
+            looked.append(f"{pattern}   (ESP32 core bundle)")
+        for path in hits:
+            if os.path.isfile(path):
+                consider([path], "ESP32 core bundle")
+
+    # As a module, under this interpreter and any other Python we can find. A
+    # pip install may well have landed in a different one.
+    consider([sys.executable, "-m", "esptool"], "this interpreter")
+    for launcher in (["py", "-3"], ["python"], ["python3"]):
+        exe = shutil.which(launcher[0])
+        if exe:
+            consider([exe] + launcher[1:] + ["-m", "esptool"], "other interpreter")
+
+    # Console scripts, on PATH and in the script directories pip actually uses.
+    for name in ("esptool", "esptool.py", "esptool.exe"):
         found = shutil.which(name)
         if found:
-            candidates.append([found])
+            consider([found], "on PATH")
+    for directory in _python_script_dirs():
+        for name in ("esptool.exe", "esptool", "esptool.py"):
+            path = directory / name
+            if path.is_file():
+                consider([str(path)], "pip scripts dir")
+        looked.append(f"{directory}   (pip scripts dir)")
 
     for cmd in candidates:
         try:
@@ -106,9 +169,18 @@ def find_esptool(explicit: Optional[str] = None,
         except (OSError, subprocess.SubprocessError):
             continue
 
+    tried = "\n".join(f"    {entry}" for entry in looked) or "    (nothing)"
+    hint = (f'"{sys.executable}" -m pip install esptool'
+            if os.name == "nt" else f"{sys.executable} -m pip install esptool")
     raise EspError(
-        "esptool not found. Install it with:  pip install esptool\n"
-        "(or install the ESP32 board package in the Arduino IDE, which bundles it)"
+        "esptool not found.\n\n"
+        "  Looked in:\n" + tried + "\n\n"
+        "  If it is installed, it is under a different Python than the one\n"
+        "  running this tool. Installing it into this one always works:\n\n"
+        f"      {hint}\n\n"
+        "  Or point straight at it:  --esptool C:\\path\\to\\esptool.exe\n"
+        "  Installing the ESP32 board package (arduino-cli --install-deps, or\n"
+        "  the Arduino IDE Boards Manager) also brings a copy."
     )
 
 
