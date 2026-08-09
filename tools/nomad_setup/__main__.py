@@ -172,9 +172,9 @@ def cmd_sdcard(args) -> int:
 
 
 def _pick_port(args) -> str:
-    ports = esp.list_serial_ports()
     if args.port:
         return args.port
+    ports = esp.list_serial_ports_detailed()
     if not ports and args.dry_run:
         c.warn("No serial port found; using a placeholder for the dry run")
         return "DRY-RUN-PORT"
@@ -184,9 +184,18 @@ def _pick_port(args) -> str:
             "  These sticks have no reset button: unplug it, hold the boot "
             "button, plug it back in while holding, then re-run."
         )
-    options = [(dev, f"{dev}  {desc}".rstrip()) for dev, desc in ports]
-    default = 0 if len(options) == 1 else None
-    chosen = c.choose("Which serial port is the board on?", options, default)
+
+    # The board says what it is over USB. Asking anyway is just make-work.
+    found, why = esp.autodetect_port(ports)
+    if found is not None:
+        c.ok(f"Board on {found.device} - {why}")
+        c.info(c.dim(f"Override with --port if that is wrong "
+                     f"({', '.join(p.device for p in ports)})"))
+        return found.device
+
+    c.warn(f"Cannot tell which port is the board: {why}.")
+    options = [(p.device, p.label) for p in ports]
+    chosen = c.choose("Which serial port is the board on?", options)
     if not chosen:
         raise esp.EspError("No port selected")
     return chosen
@@ -502,11 +511,20 @@ def cmd_list_disks(args) -> int:
 
 
 def cmd_list_ports(args) -> int:
-    ports = esp.list_serial_ports()
+    ports = esp.list_serial_ports_detailed()
     if not ports:
         c.info("No serial ports found.")
         return 0
-    c.table(["port", "description"], [[d, desc] for d, desc in ports])
+    rows = []
+    for p in ports:
+        ids = f"{p.vid:04X}:{p.pid:04X}" if p.vid is not None and p.pid is not None else ""
+        rows.append([p.device, p.kind, ids, p.note or p.description])
+    c.table(["port", "kind", "usb id", "what it is"], rows)
+    found, why = esp.autodetect_port(ports)
+    if found is not None:
+        c.ok(f"Would use {found.device} - {why}")
+    else:
+        c.info(f"Would ask: {why}")
     return 0
 
 

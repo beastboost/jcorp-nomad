@@ -324,6 +324,47 @@ def run_picker_tests() -> int:
     return failures
 
 
+def _p(dev, desc="", vid=None, pid=None):
+    return esp.SerialPort(dev, desc, vid, pid)
+
+
+# 0x303A is Espressif's own VID; 0x1A86/0x10C4 are the bridges on dev boards.
+# None as the expectation means "must ask" - guessing between two boards is
+# worse than one question.
+_PORT_CASES = [
+    ("dongle among unrelated ports",
+     [_p("COM6", "USB Serial Device", 0x303A, 0x1001), _p("COM9", "Bluetooth"),
+      _p("COM8", "Intel AMT", 0x8086, 0x1234)], "COM6"),
+    ("dongle alone", [_p("COM6", "", 0x303A, 0x1001)], "COM6"),
+    ("dongle beside a CP210x board",
+     [_p("COM6", "", 0x303A, 0x1001), _p("COM4", "", 0x10C4, 0xEA60)], "COM6"),
+    ("two ESP32s connected",
+     [_p("COM6", "", 0x303A, 0x1001), _p("COM7", "", 0x303A, 0x1001)], None),
+    ("older ESP32 behind a CH340",
+     [_p("COM3", "", 0x1A86, 0x7523), _p("COM9", "Bluetooth")], "COM3"),
+    ("two bridges, neither native",
+     [_p("COM3", "", 0x1A86, 0x7523), _p("COM4", "", 0x10C4, 0xEA60)], None),
+    ("a single anonymous port", [_p("COM6", "")], "COM6"),
+    ("several, none identify",
+     [_p("COM9", "Bluetooth"), _p("COM8", "Intel")], None),
+    ("linux native usb", [_p("/dev/ttyACM0", "", 0x303A, 0x1001)], "/dev/ttyACM0"),
+]
+
+
+def run_port_tests() -> int:
+    c.heading("Serial port autodetection")
+    failures = 0
+    rows = []
+    for name, ports, expect in _PORT_CASES:
+        found, why = esp.autodetect_port(ports)
+        device = found.device if found else None
+        passed = device == expect
+        failures += 0 if passed else 1
+        rows.append([name, "PASS" if passed else "FAIL", device or "asks", why])
+    c.table(["situation", "result", "picks", "because"], rows)
+    return failures
+
+
 def run_template_tests() -> int:
     """The required-files manifest is only useful if it matches the template
     actually shipped in the repo, so check the two against each other."""
@@ -378,7 +419,8 @@ def cmd_selftest(args) -> int:
 
     failures = (run_fat32_tests() + run_chip_probe_tests()
                 + run_preflight_tests() + run_diagnosis_tests()
-                + run_picker_tests() + run_template_tests())
+                + run_picker_tests() + run_port_tests()
+                + run_template_tests())
 
     c.heading("Result")
     if failures:
