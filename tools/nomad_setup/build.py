@@ -116,15 +116,21 @@ def find_arduino_cli(explicit: Optional[str] = None) -> Optional[ArduinoCli]:
     return None
 
 
+def install_command() -> str:
+    """Just the command, for printing on its own line."""
+    if sys.platform == "win32":
+        return "winget install ArduinoSA.CLI"
+    if sys.platform == "darwin":
+        return "brew install arduino-cli"
+    return ("curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/"
+            "master/install.sh | BINDIR=~/.local/bin sh")
+
+
 def install_hint() -> str:
     if sys.platform == "win32":
-        return ("Install arduino-cli from https://arduino.github.io/arduino-cli/latest/installation/ "
-                "(or 'winget install ArduinoSA.CLI') and re-run.")
-    if sys.platform == "darwin":
-        return "Install it with:  brew install arduino-cli"
-    return ("Install it with:\n"
-            "    curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/"
-            "install.sh | BINDIR=~/.local/bin sh")
+        return ("Install arduino-cli:  " + install_command() + "\n"
+                "  (or from https://arduino.github.io/arduino-cli/latest/installation/)")
+    return "Install it with:  " + install_command()
 
 
 # ------------------------------------------------------------ core / libs --

@@ -286,10 +286,14 @@ def cmd_flash(args) -> int:
 
 
 def cmd_doctor(args) -> int:
+    state = {"cli": False, "core": False, "libs": False, "esptool": False,
+             "ports": False, "disks": False, "elevated": False}
+
     c.heading("Environment")
     c.info(f"nomad-setup {VERSION}")
     c.info(f"Python {sys.version.split()[0]} on {sys.platform}")
-    c.info(f"Administrator/root: {'yes' if disks.is_privileged() else 'no'}")
+    state["elevated"] = disks.is_privileged()
+    c.info(f"Administrator/root: {'yes' if state['elevated'] else 'no'}")
     if not disks.is_privileged():
         c.warn(f"Formatting a card needs elevation. {disks.privilege_hint()}")
 
@@ -306,18 +310,23 @@ def cmd_doctor(args) -> int:
     c.heading("Build tools")
     cli = build.find_arduino_cli(args.arduino_cli)
     if cli:
+        state["cli"] = True
         c.ok(f"arduino-cli {cli.version} ({cli.path})")
         version = build.core_installed(cli)
         if version:
+            state["core"] = True
             c.ok(f"esp32 core {version}")
         else:
             c.warn("esp32 core not installed (--install-deps will fetch it)")
         have = build.installed_libraries(cli)
+        missing_libs = 0
         for name, want in build.REQUIRED_LIBRARIES:
             if name in have:
                 c.ok(f"{name} {have[name]}")
             else:
+                missing_libs += 1
                 c.warn(f"{name} missing (wanted {want})")
+        state["libs"] = missing_libs == 0
     else:
         c.warn("arduino-cli not found - you can still flash prebuilt binaries")
         c.info(build.install_hint())
@@ -325,12 +334,14 @@ def cmd_doctor(args) -> int:
     c.heading("Flash tools")
     try:
         tool = esp.find_esptool(args.esptool, cli.data_dir() if cli else None)
+        state["esptool"] = True
         c.ok(f"esptool {tool.version} ({' '.join(tool.command)})")
     except esp.EspError as exc:
         c.error(str(exc))
 
     c.heading("Serial ports")
     ports = esp.list_serial_ports()
+    state["ports"] = bool(ports)
     if ports:
         c.table(["port", "description"], [[d, desc] for d, desc in ports])
     else:
@@ -356,6 +367,7 @@ def cmd_doctor(args) -> int:
             c.table(["disk", "size", "model", "status"], rows)
         else:
             c.info("no disks reported at all")
+        state["disks"] = bool(offered)
         if not offered:
             c.warn("No card is selectable. Things to check:")
             c.info("  - Is the microSD in a card reader that is plugged in?")
@@ -367,7 +379,65 @@ def cmd_doctor(args) -> int:
     except disks.DiskError as exc:
         c.error(str(exc))
 
+    _doctor_next_step(state)
     return 0
+
+
+def _doctor_next_step(state: dict) -> None:
+    """End with one concrete thing to do, rather than leaving the reader to
+    work it out from the warnings above."""
+    c.heading("Next step")
+
+    if not state["cli"] and not state["esptool"]:
+        c.info("You have neither build nor flash tools. Installing arduino-cli")
+        c.info("solves both, because the ESP32 core it fetches bundles esptool:")
+        print()
+        c.info(f"    {c.bold(build.install_command())}")
+        print()
+        c.info("Then reopen your terminal so PATH updates, and run:")
+        c.info(f"    {c.bold('nomad-setup flash --install-deps')}")
+        return
+
+    if not state["cli"]:
+        c.info("No arduino-cli, so the firmware cannot be built here. Either:")
+        c.info(f"    {c.bold(build.install_command())}")
+        c.info("or build in the Arduino IDE and flash what it produces:")
+        c.info(f"    {c.bold('nomad-setup flash --firmware <build output dir>')}")
+        return
+
+    if not state["esptool"]:
+        c.info("arduino-cli is here but esptool is not. Installing the ESP32")
+        c.info("core brings a copy along with everything else needed to build:")
+        c.info(f"    {c.bold('nomad-setup flash --install-deps')}")
+        return
+
+    if not (state["core"] and state["libs"]):
+        c.info("Tools are in place; the ESP32 core or libraries still need")
+        c.info("fetching. This is a one-off download of roughly a gigabyte:")
+        c.info(f"    {c.bold('nomad-setup flash --install-deps')}")
+        return
+
+    if not state["ports"]:
+        c.info("Everything is installed, but no board is showing up. Plug the")
+        c.info("stick in; if it still does not appear, unplug it, hold the boot")
+        c.info("button, plug it back in while holding, then re-run.")
+        return
+
+    if not state["disks"]:
+        c.info("Ready to flash the firmware:")
+        c.info(f"    {c.bold('nomad-setup flash')}")
+        print()
+        c.info("The card step needs a reader (the stick cannot expose its own")
+        c.info("card until the firmware is on it). With one plugged in:")
+        c.info(f"    {c.bold('nomad-setup sdcard')}")
+        if not state["elevated"]:
+            c.info("    ...from an Administrator prompt - formatting needs elevation.")
+        return
+
+    c.ok("Everything is in place. Run the guided setup:")
+    c.info(f"    {c.bold('nomad-setup')}")
+    if not state["elevated"]:
+        c.warn("Use an Administrator prompt so the card step can format.")
 
 
 def cmd_list_disks(args) -> int:
