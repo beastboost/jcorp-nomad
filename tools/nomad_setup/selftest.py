@@ -182,6 +182,8 @@ def run_preflight_tests() -> int:
         ("built for bigger flash", 1_450_000, 0x300000, 16, 4, "ESP32-S3", False),
         ("smaller build on big chip", 1_450_000, 0x300000, 4, 16, "ESP32-S3", True),
         ("wrong chip family", 1_450_000, 0x300000, 16, 16, "ESP32-C3", False),
+        # An unparseable chip name is our bug, not a wrong board: warn, allow.
+        ("chip name unreadable", 1_450_000, 0x300000, 16, 16, "", True),
     ]
 
     failures = 0
@@ -200,6 +202,52 @@ def run_preflight_tests() -> int:
                          (result.errors[0].split(".")[0] if result.errors else "")[:44]])
 
     c.table(["case", "result", "verdict", "reason"], rows)
+    return failures
+
+
+# Real banners. esptool changed its wording in 5.0 and the probe went on
+# reporting flash, PSRAM and MAC while silently losing the chip name, which the
+# pre-flash check then read as "not an S3" and refused to flash a good board.
+_PROBE_CASES = [
+    ("esptool 5.x", """esptool v5.3.1
+Connected to ESP32-S3 on COM6:
+Chip type:          ESP32-S3 (QFN56) (revision v0.2)
+Features:           Wi-Fi, BLE, Embedded PSRAM 8MB (AP_3v3)
+Crystal frequency:  40MHz
+MAC:                3c:0f:02:d9:6b:64
+Detected flash size: 16MB
+""", "ESP32-S3", 16, 8),
+    ("esptool 4.x", """esptool.py v4.8.1
+Chip is ESP32-S3 (revision v0.2)
+Features: WiFi, BLE, Embedded PSRAM 8MB (AP_3v3)
+MAC: 3c:0f:02:d9:6b:64
+Detected flash size: 16MB
+""", "ESP32-S3", 16, 8),
+    ("5.x secure download", """esptool v5.3.1
+Connected to ESP32-S3 on COM6:
+Chip type:          ESP32-S3 in Secure Download Mode
+""", "ESP32-S3", 0, 0),
+    ("non-S3 board", """esptool.py v4.8.1
+Chip is ESP32-C3 (revision v0.4)
+Features: WiFi, BLE
+Detected flash size: 4MB
+""", "ESP32-C3", 4, 0),
+]
+
+
+def run_chip_probe_tests() -> int:
+    c.heading("Chip banner parsing")
+    failures = 0
+    rows = []
+    for name, banner, want_chip, want_flash, want_psram in _PROBE_CASES:
+        info = esp.parse_chip_output(banner)
+        got = (info.chip, info.flash_mb, info.psram_mb)
+        want = (want_chip, want_flash, want_psram)
+        passed = got == want
+        failures += 0 if passed else 1
+        rows.append([name, "PASS" if passed else "FAIL", info.chip or "(none)",
+                     f"{info.flash_mb} MB", f"{info.psram_mb} MB PSRAM"])
+    c.table(["banner", "result", "chip", "flash", "psram"], rows)
     return failures
 
 
@@ -255,7 +303,8 @@ def cmd_selftest(args) -> int:
     c.heading("nomad-setup self-test")
     c.info("Nothing here touches a disk or a board.")
 
-    failures = run_fat32_tests() + run_preflight_tests() + run_template_tests()
+    failures = (run_fat32_tests() + run_chip_probe_tests()
+                + run_preflight_tests() + run_template_tests())
 
     c.heading("Result")
     if failures:
