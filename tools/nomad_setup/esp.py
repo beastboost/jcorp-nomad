@@ -170,6 +170,7 @@ def find_esptool(explicit: Optional[str] = None,
             continue
 
     tried = "\n".join(f"    {entry}" for entry in looked) or "    (nothing)"
+    invocation = ".\\nomad-setup.bat" if os.name == "nt" else "nomad-setup"
     hint = (f'"{sys.executable}" -m pip install esptool'
             if os.name == "nt" else f"{sys.executable} -m pip install esptool")
     raise EspError(
@@ -181,7 +182,7 @@ def find_esptool(explicit: Optional[str] = None,
         "  Or point straight at it:  --esptool C:\\path\\to\\esptool.exe\n\n"
         "  Easiest of all, if arduino-cli is installed: the ESP32 core ships an\n"
         "  esptool, and this fetches it along with everything needed to build:\n\n"
-        "      nomad-setup flash --install-deps"
+        f"      {invocation} flash --install-deps"
     )
 
 
