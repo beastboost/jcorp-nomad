@@ -1,11 +1,22 @@
 #!/bin/sh
 # nomad-setup launcher - works from any directory.
 # Formatting a card needs root, so: sudo ./tools/nomad-setup sdcard
-set -e
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PY=${PYTHON:-python3}
-command -v "$PY" >/dev/null 2>&1 || {
-    echo "python3 not found. Install Python 3.8 or newer and try again." >&2
+
+# Prefer python3, but accept a "python" that is actually 3.x.
+PY=""
+for candidate in "${PYTHON:-}" python3 python; do
+    [ -n "$candidate" ] || continue
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys' >/dev/null 2>&1; then
+        PY="$candidate"
+        break
+    fi
+done
+
+if [ -z "$PY" ]; then
+    echo "nomad-setup: no working Python 3 found." >&2
+    echo "  Install Python 3.8 or newer, or set PYTHON=/path/to/python3" >&2
     exit 1
-}
+fi
+
 PYTHONPATH="$DIR${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m nomad_setup "$@"

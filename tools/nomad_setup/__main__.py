@@ -14,6 +14,12 @@ from . import boards, build, console as c, disks, esp, sdcard, selftest
 
 VERSION = "1.0.0"
 
+if sys.version_info < (3, 8):  # pragma: no cover - guard for old interpreters
+    sys.exit(
+        f"nomad-setup needs Python 3.8 or newer; this is "
+        f"{sys.version_info.major}.{sys.version_info.minor}."
+    )
+
 
 # ============================================================== SD card ====
 
