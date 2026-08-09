@@ -63,12 +63,27 @@ tools\nomad-setup.bat               # same thing on Windows
 | `nomad-setup selftest` | Verify the FAT32 formatter and the pre-flash checks offline |
 | `nomad-setup flash` | Build (or take prebuilt binaries) and write to the board |
 | `nomad-setup sdcard` | Format a card and copy the Nomad files onto it |
+| `nomad-setup erase` | Wipe the whole flash and stop. Asks you to type `ERASE`. |
 | `nomad-setup repair-core` | Reinstall the ESP32 board package and clear the build caches |
 | `update.bat` | Fetch the latest code from GitHub (Windows) |
 | `nomad-setup list-disks` / `list-ports` | Just the lists |
 
 Start with `doctor`. It reports what is installed, what is missing, and ends
 with the single command to run next.
+
+### Wiping a board
+
+`flash --erase` clears the flash on the way to writing new firmware, which is
+what you usually want. When the board arrived with somebody else's project on it
+— or the build is broken and you want it gone anyway — erase on its own:
+
+```
+nomad-setup erase --board p4-dev
+```
+
+It probes the chip first and refuses if it is not the one `--board` names, then
+asks you to type `ERASE`. Everything in flash goes: firmware, saved settings,
+the Wi-Fi name. The SD card is not touched.
 
 ### Keeping up to date
 
