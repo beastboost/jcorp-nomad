@@ -62,6 +62,7 @@ tools\nomad-setup.bat               # same thing on Windows
 | `nomad-setup selftest` | Verify the FAT32 formatter and the pre-flash checks offline |
 | `nomad-setup flash` | Build (or take prebuilt binaries) and write to the board |
 | `nomad-setup sdcard` | Format a card and copy the Nomad files onto it |
+| `nomad-setup repair-core` | Reinstall the ESP32 board package and clear the build caches |
 | `nomad-setup list-disks` / `list-ports` | Just the lists |
 
 Start with `doctor`. It reports what is installed, what is missing, and ends
@@ -102,6 +103,25 @@ PowerShell. Without it the error text goes to a separate stream and is lost.
 If you double-click it and the window closes instantly, the launcher now holds
 it open and prints the exit code. A window that still vanishes means `cmd` never
 reached the script at all, usually a path or permissions problem.
+
+### When the build fails inside the ESP32 core
+
+A compile that dies in the core's own headers rather than in the sketch —
+anything naming `esp32s3-libs`, `esp32-arduino-libs` or `xtensa-esp-elf` with
+`Invalid argument`, `Permission denied`, or `%1 is not a valid Win32
+application` — is a damaged board-package install, not a code problem. The
+download was interrupted, or a scanner grabbed a file mid-extraction. The core
+still reports its version, so nothing looks wrong until a compile reaches the
+part that never landed.
+
+```
+nomad-setup repair-core
+```
+
+That uninstalls the package, deletes the build caches (a stale cache outlives a
+reinstall and can re-poison a fresh one) and downloads it again. The tool
+recognises this failure and points you here rather than printing the compiler
+trace and stopping.
 
 ### Starting from nothing
 

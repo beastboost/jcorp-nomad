@@ -43,6 +43,83 @@ class BuildError(RuntimeError):
     pass
 
 
+# A compile that dies inside the ESP32 core's own headers is not a problem with
+# the sketch, and printing 40 lines of preprocessor trace at somebody is not a
+# diagnosis. The usual cause is a half-extracted esp32*-libs tool package: the
+# core installs, reports its version happily, and then GCC hits a path the OS
+# refuses. "Invalid argument" and "%1 is not a valid Win32 application" are the
+# two shapes this takes on Windows.
+_CORE_PATH = r"(esp32[a-z0-9]*-libs|esp32-arduino-libs|xtensa-esp-elf|riscv32-esp-elf)"
+_TOOLCHAIN_BROKEN = (
+    re.compile(r"fatal error:[^\n]*" + _CORE_PATH + r"[^\n]*"
+               r"(Invalid argument|Permission denied|No such file or directory)", re.I),
+    re.compile(r"is not a valid Win32 application", re.I),
+    re.compile(r"cannot execute[^\n]*" + _CORE_PATH, re.I),
+)
+
+
+def diagnose_build_failure(output: str) -> Optional[str]:
+    """Turn a recognised toolchain failure into an instruction. None if the
+    failure looks like an ordinary compile error in the sketch."""
+    if not output:
+        return None
+    for pattern in _TOOLCHAIN_BROKEN:
+        m = pattern.search(output)
+        if not m:
+            continue
+        return (
+            "The build failed inside the ESP32 core's own files, not in the "
+            "Nomad sketch:\n\n"
+            f"    {m.group(0).strip()[:160]}\n\n"
+            "That is a damaged board-package install - usually the esp32*-libs\n"
+            "download was interrupted or an antivirus scanner got hold of it\n"
+            "mid-extraction. The core still reports its version, so nothing\n"
+            "looks wrong until a compile touches the missing part.\n\n"
+            f"Repair it with:\n\n    {_cli_hint()} repair-core\n\n"
+            "That removes the board package, clears the build caches and\n"
+            "reinstalls from scratch (about a gigabyte). Then run flash again."
+        )
+    return None
+
+
+def _cli_hint() -> str:
+    return ".\\nomad-setup.bat" if sys.platform == "win32" else "nomad-setup"
+
+
+def build_cache_dirs() -> List[Path]:
+    """Where arduino-cli keeps compiled cores and sketches between builds. A
+    stale cache survives a core reinstall and can re-poison a fresh one."""
+    out: List[Path] = []
+    tmp = Path(os.environ.get("TEMP") or os.environ.get("TMP") or "/tmp")
+    for name in ("arduino", "arduino-core-cache", "arduino-sketch-cache"):
+        p = tmp / name
+        if p.is_dir():
+            out.append(p)
+    return out
+
+
+def repair_core(cli: ArduinoCli, version: str = "", dry_run: bool = False) -> None:
+    """Uninstall the ESP32 core, clear the build caches, reinstall."""
+    target = f"{ESP32_CORE}@{version}" if version else ESP32_CORE
+
+    c.step(f"Removing {ESP32_CORE}")
+    cli.run(["core", "uninstall", ESP32_CORE], check=False, stream=True, dry_run=dry_run)
+
+    for cache in build_cache_dirs():
+        c.step(f"Clearing build cache {cache}")
+        if dry_run:
+            c.info(c.dim(f"[dry-run] rm -r {cache}"))
+        else:
+            shutil.rmtree(cache, ignore_errors=True)
+
+    c.step(f"Reinstalling {target} (about a gigabyte, give it a while)")
+    cli.run(["core", "update-index", "--additional-urls", ESP32_INDEX_URL],
+            check=False, stream=True, dry_run=dry_run)
+    cli.run(["core", "install", target, "--additional-urls", ESP32_INDEX_URL],
+            stream=True, dry_run=dry_run, timeout=5400)
+    c.ok("Board package reinstalled")
+
+
 @dataclass
 class ArduinoCli:
     path: str
@@ -55,13 +132,29 @@ class ArduinoCli:
             return subprocess.CompletedProcess(cmd, 0, "", "")
         c.debug("$ " + " ".join(cmd))
         if stream:
-            proc = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+            # Tee rather than hand the terminal over: a long compile has to stay
+            # visible, but we also need the text afterwards to tell a broken
+            # toolchain apart from a broken sketch.
+            popen = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+            )
+            chunks: List[str] = []
+            assert popen.stdout is not None
+            for line in popen.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                chunks.append(line)
+            popen.wait(timeout=timeout)
+            proc = subprocess.CompletedProcess(cmd, popen.returncode, "".join(chunks), "")
         else:
             proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         if check and proc.returncode != 0:
-            detail = ""
-            if not stream:
-                detail = "\n" + ((proc.stdout or "") + (proc.stderr or "")).strip()
+            output = (proc.stdout or "") + (proc.stderr or "")
+            advice = diagnose_build_failure(output)
+            if advice:
+                raise BuildError(advice)
+            detail = "" if stream else "\n" + output.strip()
             raise BuildError(f"arduino-cli {' '.join(args[:2])} failed{detail}")
         return proc
 
