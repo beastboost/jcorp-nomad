@@ -31,6 +31,12 @@ class Board:
     chip_name: str = "ESP32-S3"
     notes: str = ""
 
+    @property
+    def esptool_chip(self) -> str:
+        """What to pass esptool as --chip. Derived from the FQBN rather than
+        stored, so it cannot drift out of step with the board being built."""
+        return self.fqbn.split(":")[-1]
+
 
 BOARDS: Dict[str, Board] = {
     "pocket-dongle": Board(

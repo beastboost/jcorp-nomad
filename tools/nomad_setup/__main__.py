@@ -315,9 +315,11 @@ def cmd_flash(args) -> int:
 
     if args.erase:
         c.step("Erasing the whole flash first")
-        esp.erase_flash(tool, port, baud=args.baud, dry_run=args.dry_run)
+        esp.erase_flash(tool, port, baud=args.baud, dry_run=args.dry_run,
+                        chip=board.esptool_chip)
 
-    esp.flash(tool, plan, port, baud=args.baud, dry_run=args.dry_run)
+    esp.flash(tool, plan, port, baud=args.baud, dry_run=args.dry_run,
+              chip=board.esptool_chip)
 
     c.heading("Firmware flashed")
     c.info("The board reboots on its own. With a prepared card inserted it")
