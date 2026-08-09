@@ -285,6 +285,120 @@ def run_diagnosis_tests() -> int:
     return failures
 
 
+_PORTS = [("COM6", "COM6"), ("COM9", "COM9"), ("COM8", "COM8")]
+_DISKS = [("/dev/sdb", "/dev/sdb  SanDisk Ultra 32 GB"),
+          ("/dev/sdc", "/dev/sdc  Generic 8 GB")]
+_TRICKY = [("COM3", "COM3"), ("COM1", "COM1")]      # index 1 vs a port named COM1
+_AMBIG = [("COM6", "COM6"), ("COM16", "COM16")]     # "6" occurs in both
+
+# Listing "1) COM6" and then rejecting "COM6" is indefensible. None is "refuse".
+_PICKER_CASES = [
+    ("port by index",          _PORTS,  "1",        "COM6"),
+    ("port by name",           _PORTS,  "COM6",     "COM6"),
+    ("port by name, lowercase", _PORTS, "com6",     "COM6"),
+    ("port by its own digit",  _PORTS,  "6",        "COM6"),
+    ("disk by path",           _DISKS,  "/dev/sdb", "/dev/sdb"),
+    ("disk by bare name",      _DISKS,  "sdb",      "/dev/sdb"),
+    ("disk by brand",          _DISKS,  "SanDisk",  "/dev/sdb"),
+    ("index beats a lookalike name", _TRICKY, "1",  "COM3"),
+    ("that lookalike by name", _TRICKY, "COM1",     "COM1"),
+    ("ambiguous fragment",     _AMBIG,  "6",        None),
+    ("exact wins over ambiguity", _AMBIG, "COM6",   "COM6"),
+    ("matches nothing",        _PORTS,  "COM4",     None),
+    ("empty",                  _PORTS,  "",         None),
+]
+
+
+def run_picker_tests() -> int:
+    c.heading("Port and disk picker")
+    failures = 0
+    rows = []
+    for name, options, typed, expect in _PICKER_CASES:
+        index, message = c.resolve_choice(typed, options)
+        got = options[index][0] if index is not None else None
+        passed = got == expect
+        failures += 0 if passed else 1
+        rows.append([name, "PASS" if passed else "FAIL", repr(typed),
+                     got if got is not None else "refused"])
+    c.table(["case", "result", "typed", "selected"], rows)
+    return failures
+
+
+def _p(dev, desc="", vid=None, pid=None):
+    return esp.SerialPort(dev, desc, vid, pid)
+
+
+# 0x303A is Espressif's own VID; 0x1A86/0x10C4 are the bridges on dev boards.
+# None as the expectation means "must ask" - guessing between two boards is
+# worse than one question.
+_PORT_CASES = [
+    ("dongle among unrelated ports",
+     [_p("COM6", "USB Serial Device", 0x303A, 0x1001), _p("COM9", "Bluetooth"),
+      _p("COM8", "Intel AMT", 0x8086, 0x1234)], "COM6"),
+    ("dongle alone", [_p("COM6", "", 0x303A, 0x1001)], "COM6"),
+    ("dongle beside a CP210x board",
+     [_p("COM6", "", 0x303A, 0x1001), _p("COM4", "", 0x10C4, 0xEA60)], "COM6"),
+    ("two ESP32s connected",
+     [_p("COM6", "", 0x303A, 0x1001), _p("COM7", "", 0x303A, 0x1001)], None),
+    ("older ESP32 behind a CH340",
+     [_p("COM3", "", 0x1A86, 0x7523), _p("COM9", "Bluetooth")], "COM3"),
+    ("two bridges, neither native",
+     [_p("COM3", "", 0x1A86, 0x7523), _p("COM4", "", 0x10C4, 0xEA60)], None),
+    ("a single anonymous port", [_p("COM6", "")], "COM6"),
+    ("several, none identify",
+     [_p("COM9", "Bluetooth"), _p("COM8", "Intel")], None),
+    ("linux native usb", [_p("/dev/ttyACM0", "", 0x303A, 0x1001)], "/dev/ttyACM0"),
+]
+
+
+def run_port_tests() -> int:
+    c.heading("Serial port autodetection")
+    failures = 0
+    rows = []
+    for name, ports, expect in _PORT_CASES:
+        found, why = esp.autodetect_port(ports)
+        device = found.device if found else None
+        passed = device == expect
+        failures += 0 if passed else 1
+        rows.append([name, "PASS" if passed else "FAIL", device or "asks", why])
+    c.table(["situation", "result", "picks", "because"], rows)
+    return failures
+
+
+def run_recheck_tests() -> int:
+    """A COM number noted before a multi-minute build may not survive it."""
+    c.heading("Port re-check before writing")
+    real = esp.list_serial_ports_detailed
+    cases = [
+        ("board moved while building",
+         [_p("COM7", "", 0x303A, 0x1001), _p("COM9", "Bluetooth")], "COM6", False, "COM7", True),
+        ("nothing moved",
+         [_p("COM6", "", 0x303A, 0x1001)], "COM6", False, "COM6", False),
+        ("--port given, never overridden",
+         [_p("COM7", "", 0x303A, 0x1001)], "COM6", True, "COM6", False),
+        ("board gone, nothing to switch to",
+         [_p("COM9", "Bluetooth"), _p("COM8", "Intel")], "COM6", False, "COM6", False),
+        ("cannot enumerate at all", [], "COM6", False, "COM6", False),
+        ("linux re-enumeration",
+         [_p("/dev/ttyACM1", "", 0x303A, 0x1001)], "/dev/ttyACM0", False,
+         "/dev/ttyACM1", True),
+    ]
+    failures = 0
+    rows = []
+    try:
+        for name, ports, before, explicit, want, want_note in cases:
+            esp.list_serial_ports_detailed = lambda ports=ports: ports
+            after, note = esp.recheck_port(before, explicit=explicit)
+            passed = after == want and bool(note) == want_note
+            failures += 0 if passed else 1
+            rows.append([name, "PASS" if passed else "FAIL", before, after,
+                         "warns" if note else ""])
+    finally:
+        esp.list_serial_ports_detailed = real
+    c.table(["situation", "result", "picked earlier", "writes to", "note"], rows)
+    return failures
+
+
 def run_template_tests() -> int:
     """The required-files manifest is only useful if it matches the template
     actually shipped in the repo, so check the two against each other."""
@@ -339,6 +453,7 @@ def cmd_selftest(args) -> int:
 
     failures = (run_fat32_tests() + run_chip_probe_tests()
                 + run_preflight_tests() + run_diagnosis_tests()
+                + run_picker_tests() + run_port_tests() + run_recheck_tests()
                 + run_template_tests())
 
     c.heading("Result")

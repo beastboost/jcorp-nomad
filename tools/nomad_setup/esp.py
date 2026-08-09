@@ -186,33 +186,193 @@ def find_esptool(explicit: Optional[str] = None,
     )
 
 
-def list_serial_ports() -> List[Tuple[str, str]]:
-    """[(device, description)] - pyserial when available, OS fallbacks otherwise."""
+# A board that identifies itself over USB should not be something you are asked
+# to find in a list. 0x303A is Espressif's own VID, used by the S3's native
+# USB-CDC - which is what this dongle enumerates as. The rest are the USB-UART
+# bridges soldered to dev boards; they say "an ESP is probably behind this", not
+# "this is an ESP", so they rank lower.
+ESPRESSIF_VID = 0x303A
+BRIDGE_VIDS = {
+    0x10C4: "Silicon Labs CP210x",
+    0x1A86: "WCH CH340/CH9102",
+    0x0403: "FTDI",
+    0x067B: "Prolific PL2303",
+}
+
+KIND_NATIVE = "esp32"
+KIND_BRIDGE = "usb-serial"
+KIND_OTHER = "other"
+
+
+@dataclass
+class SerialPort:
+    device: str
+    description: str = ""
+    vid: Optional[int] = None
+    pid: Optional[int] = None
+
+    @property
+    def kind(self) -> str:
+        if self.vid == ESPRESSIF_VID:
+            return KIND_NATIVE
+        if self.vid in BRIDGE_VIDS:
+            return KIND_BRIDGE
+        return KIND_OTHER
+
+    @property
+    def note(self) -> str:
+        if self.kind == KIND_NATIVE:
+            return "ESP32 (Espressif USB)"
+        if self.kind == KIND_BRIDGE:
+            return BRIDGE_VIDS.get(self.vid or 0, "USB-serial bridge")
+        return self.description
+
+    @property
+    def label(self) -> str:
+        bits = [self.device]
+        note = self.note or self.description
+        if note:
+            bits.append(note)
+        return "  ".join(bits)
+
+
+def _sysfs_ids(device: str) -> Tuple[Optional[int], Optional[int]]:
+    name = os.path.basename(device)
+    base = Path("/sys/class/tty") / name / "device"
+    for _ in range(4):                      # walk up to the USB device node
+        try:
+            vid = (base / "idVendor").read_text().strip()
+            pid = (base / "idProduct").read_text().strip()
+            return int(vid, 16), int(pid, 16)
+        except Exception:
+            base = base / ".."
+    return None, None
+
+
+_WIN_PORT_RE = re.compile(r"\((COM\d+)\)")
+_WIN_VIDPID_RE = re.compile(r"VID_([0-9A-F]{4})&PID_([0-9A-F]{4})", re.I)
+
+
+def _windows_ports() -> List[SerialPort]:
+    """No pyserial: ask Windows itself. GetPortNames() returns bare names with
+    no identity, which is what left people picking COM ports by hand."""
+    script = (
+        "Get-CimInstance Win32_PnPEntity | "
+        "Where-Object { $_.Name -match '\\(COM\\d+\\)' } | "
+        "ForEach-Object { \"$($_.Name)|$($_.DeviceID)\" }"
+    )
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+    except Exception:
+        return []
+
+    found: List[SerialPort] = []
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        name, _, device_id = line.partition("|")
+        m = _WIN_PORT_RE.search(name)
+        if not m:
+            continue
+        vid = pid = None
+        ids = _WIN_VIDPID_RE.search(device_id)
+        if ids:
+            vid, pid = int(ids.group(1), 16), int(ids.group(2), 16)
+        desc = _WIN_PORT_RE.sub("", name).strip()
+        found.append(SerialPort(m.group(1), desc, vid, pid))
+
+    if found:
+        return found
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "[System.IO.Ports.SerialPort]::GetPortNames()"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        return [SerialPort(p.strip()) for p in (proc.stdout or "").split() if p.strip()]
+    except Exception:
+        return []
+
+
+def list_serial_ports_detailed() -> List[SerialPort]:
     try:
         from serial.tools import list_ports  # type: ignore
 
-        return [(p.device, (p.description or "").strip()) for p in list_ports.comports()]
+        out = [SerialPort(p.device, (p.description or "").strip(), p.vid, p.pid)
+               for p in list_ports.comports()]
+        if out:
+            return out
     except Exception:
         pass
 
     if sys.platform == "win32":
-        try:
-            proc = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "[System.IO.Ports.SerialPort]::GetPortNames()"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
-            )
-            return [(p.strip(), "") for p in (proc.stdout or "").split() if p.strip()]
-        except Exception:
-            return []
+        return _windows_ports()
 
     patterns = (["/dev/cu.usbmodem*", "/dev/cu.usbserial*", "/dev/cu.wchusbserial*"]
                 if sys.platform == "darwin"
                 else ["/dev/ttyACM*", "/dev/ttyUSB*"])
-    found: List[Tuple[str, str]] = []
+    found: List[SerialPort] = []
     for pattern in patterns:
-        found += [(p, "") for p in sorted(glob.glob(pattern))]
+        for dev in sorted(glob.glob(pattern)):
+            vid, pid = (_sysfs_ids(dev) if sys.platform != "darwin" else (None, None))
+            found.append(SerialPort(dev, "", vid, pid))
     return found
+
+
+def list_serial_ports() -> List[Tuple[str, str]]:
+    """[(device, description)] - kept for callers that only want the names."""
+    return [(p.device, p.description) for p in list_serial_ports_detailed()]
+
+
+def autodetect_port(ports: List[SerialPort]) -> Tuple[Optional[SerialPort], str]:
+    """Pick the board without asking, when the answer is not in doubt.
+
+    Returns (port, why). A None port means it is genuinely ambiguous and the
+    user has to choose - never a guess between two equally likely boards.
+    """
+    native = [p for p in ports if p.kind == KIND_NATIVE]
+    if len(native) == 1:
+        return native[0], "the only Espressif USB device connected"
+    if len(native) > 1:
+        return None, f"{len(native)} Espressif devices are connected"
+
+    bridge = [p for p in ports if p.kind == KIND_BRIDGE]
+    if len(bridge) == 1 and not native:
+        return bridge[0], f"the only {bridge[0].note} adapter connected"
+    if len(bridge) > 1:
+        return None, f"{len(bridge)} USB-serial adapters are connected"
+
+    if len(ports) == 1:
+        return ports[0], "the only serial port on the system"
+    return None, "no port identifies itself as an ESP32"
+
+
+def recheck_port(port: str, explicit: bool = False) -> Tuple[str, str]:
+    """Confirm `port` is still there, just before writing to it.
+
+    COM numbers are not stable. A build takes minutes, and an ESP32-S3 that
+    gets replugged or bounced into download mode in that window comes back on a
+    different number - so the port picked before the compile can be gone by the
+    time we flash. Returns (port to use, note); the note is empty when nothing
+    moved.
+    """
+    ports = list_serial_ports_detailed()
+    if not ports:
+        return port, ""                       # nothing to check against
+    if any(p.device == port for p in ports):
+        return port, ""
+    if explicit:
+        return port, ""                       # the user named it; do not override
+
+    found, why = autodetect_port(ports)
+    if found is None:
+        return port, ""
+    return found.device, (f"{port} is gone - the board is on {found.device} now "
+                          f"({why}). COM numbers move when a board re-enumerates.")
 
 
 # ------------------------------------------------------------ chip probe --
