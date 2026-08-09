@@ -209,6 +209,17 @@ def _list_disks_macos() -> List[Disk]:
 
 _PS_LIST_DISKS = r"""
 $ErrorActionPreference = 'Stop'
+
+# Get-Disk's BusType is not enough on its own: plenty of card readers present
+# as SCSI or RAID. Win32_DiskDrive.MediaType reports "Removable Media" for
+# those, so join the two on the disk number.
+$media = @{}
+try {
+  Get-CimInstance -ClassName Win32_DiskDrive -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($null -ne $_.Index) { $media[[int]$_.Index] = "$($_.MediaType)" }
+  }
+} catch {}
+
 Get-Disk | ForEach-Object {
   $d = $_
   $mounts = @()
@@ -217,11 +228,14 @@ Get-Disk | ForEach-Object {
                Where-Object { $_.DriveLetter } |
                ForEach-Object { "$($_.DriveLetter):" })
   } catch {}
+  $mt = ""
+  if ($media.ContainsKey([int]$d.Number)) { $mt = $media[[int]$d.Number] }
   [pscustomobject]@{
     Number       = $d.Number
     FriendlyName = $d.FriendlyName
     Size         = $d.Size
     BusType      = "$($d.BusType)"
+    MediaType    = $mt
     IsSystem     = [bool]$d.IsSystem
     IsBoot       = [bool]$d.IsBoot
     Mounts       = @($mounts)
@@ -246,13 +260,22 @@ def _list_disks_windows() -> List[Disk]:
     disks: List[Disk] = []
     for d in raw:
         bus = (d.get("BusType") or "").strip()
+        media = (d.get("MediaType") or "").strip()
+
+        # A card reader on a SCSI/RAID controller still holds removable media,
+        # and Win32_DiskDrive is what says so.
+        removable = bus in ("USB", "SD", "MMC") or "removable" in media.lower()
+
+        label = f"{(d.get('FriendlyName') or 'unknown').strip()} ({bus}"
+        label += f", {media})" if media else ")"
+
         disks.append(
             Disk(
                 identifier=str(d.get("Number")),
                 raw_path=rf"\\.\PhysicalDrive{d.get('Number')}",
-                description=f"{(d.get('FriendlyName') or 'unknown').strip()} ({bus})",
+                description=label,
                 size=int(d.get("Size") or 0),
-                removable=bus in ("USB", "SD", "MMC"),
+                removable=removable,
                 is_system=bool(d.get("IsSystem")) or bool(d.get("IsBoot")),
                 mountpoints=[m for m in (d.get("Mounts") or []) if m],
             )
