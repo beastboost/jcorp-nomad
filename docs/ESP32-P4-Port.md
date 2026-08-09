@@ -18,7 +18,7 @@ board profiles rather than by compiling.
 | SD | plain SPI, ~20 MHz | **4-bit SDIO** |
 | USB | 1.1 full-speed | **2.0 high-speed OTG + a second host port** |
 | Ethernet | none | 100M (IP101 PHY) |
-| Wi-Fi | native | **none — see below** |
+| Wi-Fi | native | **none — via the on-module C6** |
 | Screen | 0.96" SPI | none fitted (MIPI-DSI connector) |
 
 The SD bus alone is the strongest argument. The dongle streams video off a card
@@ -47,32 +47,52 @@ What is known:
   station-only by design.
 * P4 support has been in the Arduino core since 3.1.0 (ESP-IDF 5.3).
 
-### The `esp32p4` FQBN is the EV board, not a generic P4
+### Pin map, confirmed against the schematic
 
-This is the most important thing on this page. `arduino-esp32`'s `esp32p4`
-variant header says so in its own comment — *"ESP32-P4 EV Function board
-specific definitions"* — and it hardcodes, among other things, **the SDIO pins
-that carry the C6 Wi-Fi link**:
+Guition publish nothing, but there is a community mirror of the manufacturer
+schematics:
+[p1ngb4ck/unofficial_guition_esp32p4_repo](https://github.com/p1ngb4ck/unofficial_guition_esp32p4_repo/tree/main/JC-ESP32P4-M3-Dev/schematics).
+Every number below is read off sheets 3 and 4, not inferred from the reference
+design.
 
-```c
-#define BOARD_SDIO_ESP_HOSTED_CLK   18
-#define BOARD_SDIO_ESP_HOSTED_CMD   19
-#define BOARD_SDIO_ESP_HOSTED_D0    14   // D1 15, D2 16, D3 17
-#define BOARD_SDIO_ESP_HOSTED_RESET 54
-```
+| what | pins | source |
+| --- | --- | --- |
+| microSD | CLK 43, CMD 44, D0–D3 39–42 | sheet 4 |
+| Boot button | GPIO35 (`BOOTMODE`), SW1 to GND, R34 10K pull-up — active low | sheet 4 |
+| Reset button | SW2 on `CHIP_PU` | sheet 4 |
+| SD power | `ESP_LDO_VO4` → AO3401 P-FET → `TF_VCC` | sheet 3 |
+| C6 reset | GPIO54 (`C6_CHIP_PU`) | sheet 4 |
+| P4 ↔ C6 SDIO | GPIO14–19, internal to the module | sheet 4 (by absence) |
 
-Those are Espressif's EV-board pins. If Guition wired the C6 to anything else,
-Wi-Fi cannot come up and nothing in Nomad can fix it — it needs a custom
-variant. `NomadP4Probe` now prints these numbers so they can be compared
-against the schematic; that is the first thing to rule out if the radio is dead.
+The card sits on **slot 0's IOMUX pins**, so this board follows the reference
+design exactly and the stock `esp32p4` variant is correct for it.
 
-The same header also carries two things the S3 has no equivalent of, both easy
-to miss:
+**The C6 link is fine.** This was the one thing flagged as potentially fatal:
+the stock `esp32p4` variant is the ESP32-P4 *Function EV Board* and hardcodes
+the hosted SDIO pins (CLK 18, CMD 19, D0–D3 14–17, reset 54). Sheet 4 settles
+it — GPIO14–19 appear on no module pin at all, which is precisely the block the
+reference design reserves for that link, and `C6_CHIP_PU` is on GPIO54, the
+same reset pin. The C6 is inside the module, wired the standard way. No custom
+variant is needed.
 
-* `BOARD_SDMMC_POWER_PIN 45` (active **LOW**) — the card slot has a power
-  switch. Miss it and the card never powers up, which reads as bad wiring.
-* `BOARD_PERIMAN_IO_LDO0_*` — GPIO **39–48 sit behind on-chip LDO VO4** at
-  3300 mV and are dead until it is enabled. The SD data pins are in that range.
+### Two traps in the power tree
+
+* **GPIO45 is not connected here.** The EV board switches SD power with it, and
+  the variant defines `BOARD_SDMMC_POWER_PIN 45` accordingly — but on sheet 3
+  the resistor from GPIO45 to the FET gate (`R10`) is marked **NC**. The gate is
+  held low by `R13` (10K), so the FET conducts by default and the card is
+  powered whenever VO4 is up. Driving GPIO45 does nothing.
+* **LDO VO4 is the thing that actually matters.** GPIO39–48 sit behind it at
+  3300 mV and are dead until it is enabled — and every SD data line is in that
+  range. The stock variant brings it up automatically
+  (`BOARD_PERIMAN_IO_LDO_AUTO`). Any custom variant must carry that over, or the
+  card simply never appears, which reads as bad wiring.
+
+### GPIO35 is double-booked
+
+Sheet 4 puts both `BOOTMODE` (SW1) and `RMII_TXD1` on GPIO35. The boot button
+and the Ethernet PHY cannot both be live; whichever is added second has to move.
+Worth knowing before anyone wires up the RJ45.
 
 Worth checking on arrival, none of which blocks the port:
 
@@ -83,26 +103,18 @@ Worth checking on arrival, none of which blocks the port:
 * SoftAP stability. Association problems on P4+C6 over SDIO get reported (e.g.
   [esphome/esphome#10956](https://github.com/esphome/esphome/issues/10956)),
   though mostly against station mode.
-* This board's **SD pin map**. Slot 0's IOMUX pins are CLK 43, CMD 44, D0–D3
-  39–42 (ESP-IDF `soc/esp32p4/include/soc/sdmmc_pins.h`), and the profile uses
-  those — but the P4 also supports SDMMC over the GPIO matrix
-  (`SOC_SDMMC_USE_GPIO_MATRIX`), so this board is free to have wired the card
-  somewhere else. Guition publish no schematic I could find.
 
 ### Sourcing note
 
-Pin numbers on this page come from ESP-IDF and `arduino-esp32` headers, cited
-inline. Nothing here is from Guition, because I could not reach any
-manufacturer documentation — their manual pages and the ESPHome device entry
-are both blocked from this environment. So these are *the reference design's*
-pins, which this board may or may not follow. Treat every number as needing
-confirmation against the hardware.
+Pin numbers come from the manufacturer schematics linked above, plus ESP-IDF and
+`arduino-esp32` headers where noted. They have been read off a drawing, not off
+a working board, so a misread is still possible — but nothing here is a guess.
 
 An earlier version of `NomadP4Probe` swept three "candidate" SD pin sets that
-were invented rather than sourced, and two of them were actively harmful:
-`{18,19,14,15,16,17}` are the C6's SDIO link and `{...37,38}` are the console
+were invented rather than sourced, and two were actively harmful:
+`{18,19,14,15,16,17}` is the C6's SDIO link and `{...37,38}` is the console
 UART. Driving either as an SD bus breaks the thing under test. The sweep is now
-a single sourced entry.
+a single schematic-sourced entry.
 
 ## Run this first
 
@@ -117,12 +129,10 @@ and nothing else:
 2. The C6 hosted link — does `WiFi.mode()` take, and is the MAC real?
 3. `WiFi.softAP()` with Nomad's own arguments — **the decisive step**
 4. `DNSServer` + `AsyncWebServer` on port 80, serving a real page
-5. microSD over SDMMC, sweeping candidate pin sets
+5. microSD over SDMMC, on the schematic's pins
 6. A live client counter — connect a phone and watch it register
 
-It prints a verdict at the end. Step 5 sweeps rather than assumes: the S3 port
-started with a guessed pin map that was wrong on every pin, and that is not a
-mistake worth repeating.
+It prints a verdict at the end.
 
 ## The headless port (done)
 

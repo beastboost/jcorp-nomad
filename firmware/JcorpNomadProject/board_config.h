@@ -223,29 +223,32 @@
 //   in this file configures that - it is a core/sdkconfig matter - but it is
 //   why the C6's slave firmware version has to match the Arduino core's.
 //
-// SD pins below are slot 0's IOMUX pins, taken from ESP-IDF
-// soc/esp32p4/include/soc/sdmmc_pins.h - not guessed. The P4 can also route
-// SDMMC over the GPIO matrix, so a board may wire the card elsewhere; this
-// board's schematic is not published anywhere I could verify, which is why
-// NOMAD_SD_USE_DEFAULT_PINS leaves the choice to the core. Run
-// firmware/NomadP4Probe to confirm.
+// Everything below is read off the manufacturer schematic, sheets 3 and 4 of
+// github.com/p1ngb4ck/unofficial_guition_esp32p4_repo -> JC-ESP32P4-M3-Dev.
+// Nothing here is inferred from the reference design any more.
 //
-// Two things about the P4's card slot that have no equivalent on the S3:
-//   - the slot has a power-enable pin, and
-//   - GPIO 39-48 sit behind on-chip LDO VO4 and are dead until it is up.
-// Both come from the Arduino variant (BOARD_SDMMC_POWER_PIN,
-// BOARD_PERIMAN_IO_LDO_*), so they are handled for us on the EV-board variant.
-// If a custom variant is ever needed for this board, they must be carried over
-// or the card simply never powers up - which looks exactly like bad wiring.
+// The card is wired to slot 0's IOMUX pins, so the board follows the reference
+// design exactly: sheet 4 shows SD_CLK on GPIO43, SD_CMD on GPIO44 and
+// SD_DATA0..3 on GPIO39..42.
+//
+// Power: sheet 3 runs the slot from ESP_LDO_VO4 (module pin 58) through an
+// AO3401 P-FET whose gate is held low by R13 (10K). GPIO45 reaches that gate
+// only through R10, which is marked NC - not fitted. So on this board the card
+// is powered whenever LDO VO4 is up, and driving GPIO45 does nothing. What
+// does matter is the LDO: GPIO39-48 sit behind VO4 at 3300 mV and are dead
+// until it is enabled, and every SD data pin is in that range. The stock
+// esp32p4 variant brings it up automatically (BOARD_PERIMAN_IO_LDO_AUTO); a
+// custom variant would have to carry that over or the card never appears,
+// which looks exactly like bad wiring.
 #define NOMAD_BOARD_NAME "Guition JC-ESP32P4-M3-DEV"
 
 // ---- display: none -------------------------------------------------------
 #define NOMAD_HAS_DISPLAY 0
 #define NOMAD_UI_LAYOUT   NOMAD_UI_HEADLESS
 
-// ---- microSD: 4-bit SDIO -------------------------------------------------
+// ---- microSD: 4-bit SDIO, confirmed against the schematic ----------------
 #define NOMAD_SD_BUS NOMAD_SD_BUS_SDMMC
-#define NOMAD_SD_USE_DEFAULT_PINS 1
+#define NOMAD_SD_USE_DEFAULT_PINS 0   // we know them; say so rather than infer
 #define SD_CLK_PIN 43
 #define SD_CMD_PIN 44
 #define SD_D0_PIN  39
@@ -258,12 +261,17 @@
 #define LED_PIN_DATA  -1
 #define LED_PIN_CLOCK -1
 
-// GPIO 35 is the P4's BOOT_MODE strapping pin (the Arduino variant notes
-// "BOOT_MODE 35", with BOOT_MODE2 on 36). Note that on the EV-board variant 35
-// is also ETH_RMII_TX1, so if Ethernet is ever brought up on this board the
-// button and the PHY collide and this needs revisiting. Without a screen the
-// short-press page cycle does nothing; the long-press USB mass-storage mode
-// still matters.
+// Sheet 4: SW1 pulls GPIO35 (BOOTMODE) to ground, with R34 10K to VCC3V3. So
+// active-low with a pull-up, which is what NomadButton_Init already assumes.
+//
+// Two cautions from the same sheet. GPIO35 is also RMII_TXD1, so this button
+// and the Ethernet PHY cannot both be live - whichever is added second has to
+// move. And the board does have a real reset button: SW2 sits on CHIP_PU, so
+// unlike the S3 dongle there is no unplug-and-hold dance to enter download
+// mode.
+//
+// Without a screen the short-press page cycle does nothing; the long-press USB
+// mass-storage mode still matters.
 #define BOOT_BUTTON_PIN 35
 
 #else

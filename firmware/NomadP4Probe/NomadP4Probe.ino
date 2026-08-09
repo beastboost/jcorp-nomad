@@ -12,12 +12,12 @@
  *   2. Host <-> C6 hosted link   - is the co-processor talking, at what version?
  *   3. SoftAP                    - does an AP come up, with an IP?
  *   4. DNS + async web server    - the real captive-portal stack, on port 80
- *   5. microSD                   - SDMMC 4-bit, sweeping candidate pin sets
+ *   5. microSD                   - SDMMC 4-bit on the schematic's pins
  *   6. Live client count         - connect a phone and watch it register
  *
- * Steps 3-4 are the ones that decide the port. 5 is a pin-map hunt: this board's
- * SD wiring is not published anywhere I could verify, so the sketch sweeps
- * candidates and prints what worked rather than shipping a guessed pin map.
+ * Steps 3-4 are the ones that decide the port. Every pin used here is read off
+ * the manufacturer schematic (p1ngb4ck/unofficial_guition_esp32p4_repo,
+ * JC-ESP32P4-M3-Dev sheets 3 and 4), not inferred.
  *
  * Build: nomad-setup flash --board p4-dev --sketch firmware/NomadP4Probe
  * Then open the serial monitor at 115200.
@@ -76,20 +76,20 @@ static void reportHostedLink() {
   Serial.println("  The P4 has no radio of its own. Everything below depends on");
   Serial.println("  the C6 answering over SDIO.");
 
-  // The stock esp32p4 Arduino variant is the ESP32-P4 *Function EV Board* -
-  // its own header says so - and these pin numbers come from it, not from the
-  // Guition board. If Guition wired the C6 anywhere else, the link cannot come
-  // up and no amount of Nomad code fixes it; it needs a custom variant. So
-  // print what this build actually compiled in, and compare it to the
-  // schematic.
+  // The stock esp32p4 variant is the ESP32-P4 Function EV Board, so its hosted
+  // pins are the reference design's. On this module that turns out to be fine:
+  // the JC-ESP32P4-M3 schematic does not expose GPIO14-19 on any module pin,
+  // which is exactly the block the reference design uses for the P4<->C6 SDIO
+  // link, and it does expose C6_CHIP_PU on GPIO54 - the same pin the variant
+  // uses for reset. Printed anyway, because if a future module revision moves
+  // them this is the first thing to check.
 #ifdef BOARD_HAS_SDIO_ESP_HOSTED
-  Serial.printf("  hosted SDIO pins compiled in: CLK %d CMD %d D0 %d D1 %d D2 %d D3 %d, reset %d\n",
+  Serial.printf("  hosted SDIO: CLK %d CMD %d D0 %d D1 %d D2 %d D3 %d, reset %d\n",
                 BOARD_SDIO_ESP_HOSTED_CLK, BOARD_SDIO_ESP_HOSTED_CMD,
                 BOARD_SDIO_ESP_HOSTED_D0, BOARD_SDIO_ESP_HOSTED_D1,
                 BOARD_SDIO_ESP_HOSTED_D2, BOARD_SDIO_ESP_HOSTED_D3,
                 BOARD_SDIO_ESP_HOSTED_RESET);
-  Serial.println("    ^ these are the EV-board's pins. Check them against this");
-  Serial.println("      board's schematic - a mismatch is the first thing to rule out.");
+  Serial.println("    expected on JC-ESP32P4-M3: CLK 18 CMD 19 D0-D3 14-17, reset 54");
 #else
   Serial.println("  *** This build has no ESP-Hosted SDIO configuration at all.");
   Serial.println("  *** Wi-Fi cannot work. Wrong board selected in the FQBN?");
@@ -186,41 +186,40 @@ struct SdPinSet {
   int clk, cmd, d0, d1, d2, d3;
 };
 
-// Slot 0's IOMUX pins, from ESP-IDF soc/esp32p4/include/soc/sdmmc_pins.h. The
-// P4 can also route SDMMC through the GPIO matrix (SOC_SDMMC_USE_GPIO_MATRIX),
-// so a board is free to wire the card anywhere - but IOMUX is what the Arduino
-// variant selects and what a board following the reference design uses.
+// Confirmed against the manufacturer schematic (sheet 4: SD_CLK GPIO43,
+// SD_CMD GPIO44, SD_DATA0..3 GPIO39..42) - which is slot 0's IOMUX mapping, so
+// this board follows the reference design. One entry, because we know the
+// answer.
 //
-// There is deliberately only one entry. An earlier version of this sketch swept
-// "alternative" pin sets that were invented rather than sourced, and two of them
-// were actively harmful on this board: {18,19,14,15,16,17} are the SDIO pins
-// carrying the ESP32-C6 Wi-Fi link, and {..37,38} are the console UART. Driving
-// either as an SD bus breaks the thing you are trying to test. If the card does
-// not appear on these pins, read the schematic - do not guess.
+// An earlier version of this sketch swept "alternative" sets that were invented
+// rather than sourced, and two were actively harmful here: {18,19,14,15,16,17}
+// is the SDIO link to the C6 Wi-Fi co-processor and {..37,38} is the console
+// UART. Driving either as an SD bus breaks the thing under test.
 static const SdPinSet kCandidates[] = {
-  {"slot 0 IOMUX", 43, 44, 39, 40, 41, 42},
+  {"slot 0 IOMUX (schematic)", 43, 44, 39, 40, 41, 42},
 };
 
-// The card slot has its own power switch on the Function EV board, and GPIO
-// 39-48 sit behind on-chip LDO VO4. Get either wrong and the card never powers
-// up, which looks exactly like bad wiring.
-#ifndef BOARD_SDMMC_POWER_PIN
-#define BOARD_SDMMC_POWER_PIN -1
+// Sheet 3: the slot runs off ESP_LDO_VO4 through an AO3401 P-FET whose gate is
+// held low by R13 (10K), so it conducts by default. GPIO45 reaches that gate
+// only through R10, which is marked NC - so on this board the power pin the EV
+// board uses is not connected, and toggling it does nothing. The card is live
+// whenever LDO VO4 is up.
+//
+// The LDO is the part that actually matters: GPIO39-48 sit behind VO4 at
+// 3300 mV, every SD data pin is in that range, and they are dead until it is
+// enabled. The stock esp32p4 variant does that automatically.
+static void sdPowerNote() {
+#if defined(BOARD_SDMMC_POWER_PIN)
+  Serial.printf("  variant defines an SD power pin (GPIO %d). On JC-ESP32P4-M3\n",
+                (int)BOARD_SDMMC_POWER_PIN);
+  Serial.println("  R10 is NC, so that pin is not connected - not touching it.");
 #endif
-#ifndef BOARD_SDMMC_POWER_ON_LEVEL
-#define BOARD_SDMMC_POWER_ON_LEVEL LOW
+#if defined(BOARD_PERIMAN_IO_LDO_AUTO)
+  Serial.println("  LDO VO4 is enabled automatically for GPIO39-48 by this variant.");
+#else
+  Serial.println("  *** This variant does not auto-enable LDO VO4. GPIO39-48 carry");
+  Serial.println("  *** the SD data lines and will be dead - expect no card.");
 #endif
-
-static void sdPowerOn() {
-  if (BOARD_SDMMC_POWER_PIN < 0) {
-    Serial.println("  no SD power-enable pin defined for this variant");
-    return;
-  }
-  Serial.printf("  powering the slot: GPIO %d -> %s\n", (int)BOARD_SDMMC_POWER_PIN,
-                BOARD_SDMMC_POWER_ON_LEVEL == LOW ? "LOW" : "HIGH");
-  pinMode(BOARD_SDMMC_POWER_PIN, OUTPUT);
-  digitalWrite(BOARD_SDMMC_POWER_PIN, BOARD_SDMMC_POWER_ON_LEVEL);
-  delay(50);
 }
 
 static bool trySd(const SdPinSet &p, bool oneBit, int freq) {
@@ -236,7 +235,7 @@ static void sweepSd() {
   Serial.println("\n--- 5. microSD (SDIO / SDMMC) ---");
   Serial.println("  The P4 board has a 4-bit SDIO slot, so this should be much");
   Serial.println("  faster than the S3 dongle's plain SPI card.");
-  sdPowerOn();
+  sdPowerNote();
 
   const int freqs[] = {SDMMC_FREQ_HIGHSPEED, SDMMC_FREQ_DEFAULT, SDMMC_FREQ_PROBING};
 
