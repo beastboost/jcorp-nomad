@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from . import console as c
-from . import esp, fat32, sdcard
+from . import build, esp, fat32, sdcard
 
 # Card sizes worth covering: each one lands in a different cluster-size band,
 # and the >32 GB ones are exactly what Windows refuses to format.
@@ -251,6 +251,40 @@ def run_chip_probe_tests() -> int:
     return failures
 
 
+# Telling a broken toolchain apart from a broken sketch. Getting this wrong in
+# the permissive direction sends someone off to reinstall a gigabyte over a
+# typo, so the negative cases matter more than the positive ones.
+_DIAGNOSIS_CASES = [
+    ("esp32s3-libs, Invalid argument",
+     r"unordered_map:42:10: fatal error: C:\...\tools\esp32s3-libs\3.3.11/include/"
+     r"esp_pm/include/bits/range_access.h: Invalid argument", True),
+    ("toolchain not a Win32 app",
+     "xtensa-esp32s3-elf-g++.exe: %1 is not a valid Win32 application.", True),
+    ("undeclared identifier",
+     "JcorpNomadProject.ino:412:3: error: 'ui_Screen1' was not declared in this scope", False),
+    ("missing library header",
+     "JcorpNomadProject.ino:9:10: fatal error: ArduinoJson.h: No such file or directory", False),
+    ("missing lv_conf.h",
+     r"lvgl\src\lv_conf_internal.h:40:12: fatal error: ../../lv_conf.h: "
+     "No such file or directory", False),
+    ("nothing at all", "", False),
+]
+
+
+def run_diagnosis_tests() -> int:
+    c.heading("Build-failure diagnosis")
+    failures = 0
+    rows = []
+    for name, text, expect in _DIAGNOSIS_CASES:
+        got = bool(build.diagnose_build_failure(text))
+        passed = got == expect
+        failures += 0 if passed else 1
+        rows.append([name, "PASS" if passed else "FAIL",
+                     "repair-core" if got else "shown as-is"])
+    c.table(["compiler said", "result", "tool responds with"], rows)
+    return failures
+
+
 def run_template_tests() -> int:
     """The required-files manifest is only useful if it matches the template
     actually shipped in the repo, so check the two against each other."""
@@ -304,7 +338,8 @@ def cmd_selftest(args) -> int:
     c.info("Nothing here touches a disk or a board.")
 
     failures = (run_fat32_tests() + run_chip_probe_tests()
-                + run_preflight_tests() + run_template_tests())
+                + run_preflight_tests() + run_diagnosis_tests()
+                + run_template_tests())
 
     c.heading("Result")
     if failures:

@@ -16,7 +16,7 @@ VERSION = "1.0.0"
 
 
 def _cli_name() -> str:
-    """How to invoke this tool on the current platform, for use in messages.
+    r"""How to invoke this tool on the current platform, for use in messages.
     PowerShell will not run a script from the working directory without the
     leading .\ , and telling people to type a command that then fails is worse
     than saying nothing."""
@@ -467,6 +467,30 @@ def _doctor_next_step(state: dict) -> None:
         c.warn("Use an Administrator prompt so the card step can format.")
 
 
+def cmd_repair_core(args) -> int:
+    """For when the board package installed but did not install correctly."""
+    c.heading("Repairing the ESP32 board package")
+    cli = build.find_arduino_cli(getattr(args, "arduino_cli", None))
+    if not cli:
+        c.error("arduino-cli not found.")
+        c.info(build.install_hint())
+        return 1
+    c.ok(f"arduino-cli {cli.version}")
+
+    current = build.core_installed(cli)
+    c.info(f"Installed now: {current or 'none'}")
+    version = args.core_version or (current or "")
+    c.info("This removes the board package and its build caches, then downloads")
+    c.info("it again - roughly a gigabyte. Nothing else on the system is touched.")
+    if not (args.yes or c.confirm("Go ahead?", default=True)):
+        c.info("Nothing changed.")
+        return 0
+
+    build.repair_core(cli, version=version, dry_run=args.dry_run)
+    c.info(f"Now run: {c.bold(_cli_name() + ' flash')}")
+    return 0
+
+
 def cmd_list_disks(args) -> int:
     found = disks.list_disks(include_fixed=args.allow_fixed)
     if not found:
@@ -604,6 +628,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="verify the FAT32 formatter and the pre-flash checks offline"
                    ).set_defaults(func=selftest.cmd_selftest)
 
+    p_repair = sub.add_parser(
+        "repair-core", parents=[common],
+        help="reinstall the ESP32 board package and clear the build caches")
+    p_repair.add_argument("--core-version", default="",
+                          help="pin a version, e.g. 3.3.11 (default: latest)")
+    p_repair.set_defaults(func=cmd_repair_core)
+
     sub.add_parser("list-disks", parents=[common]).set_defaults(func=cmd_list_disks)
     sub.add_parser("list-ports", parents=[common]).set_defaults(func=cmd_list_ports)
 
@@ -615,7 +646,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
 
     # No subcommand -> the guided path, which is what most people want.
-    known = {"all", "sdcard", "flash", "doctor", "selftest", "list-disks", "list-ports"}
+    known = {"all", "sdcard", "flash", "doctor", "selftest", "repair-core",
+             "list-disks", "list-ports"}
     if not argv or argv[0] not in known and argv[0] not in ("-h", "--help", "--version"):
         argv = ["all"] + argv
 
