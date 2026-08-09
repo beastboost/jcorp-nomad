@@ -28,7 +28,8 @@ tools\nomad-setup.bat               # same thing on Windows
   sketch 1.25 MB and the firmware is ~1.45 MB, so it would build fine and then
   boot to nothing)
 * **Refuses to flash** if the firmware would not fit its partition, if it was
-  built for more flash than the chip has, or if the board is not an ESP32-S3
+  built for more flash than the chip has, or if the chip is not the one the
+  selected board expects (an S3 build cannot reach a P4, or the reverse)
 * Flashes using the offsets in the build's own `flash_args` file, so nothing is
   hardcoded
 
@@ -152,7 +153,8 @@ flash you can use the stick itself.
 
 ```
 --board <profile>                      pocket-dongle (GNPE stick, default),
-                                       t-dongle (LilyGO), waveshare-1.47
+                                       t-dongle (LilyGO), waveshare-1.47,
+                                       p4-dev (Guition ESP32-P4, headless)
 --dry-run                              print every step, touch nothing
 --install-deps                         fetch the ESP32 core and libraries
 --firmware <dir>                       flash prebuilt binaries, skip the build

@@ -6,6 +6,9 @@
 ******************************************************************************/
 #include "LVGL_Driver.h"
 
+// Not built on a headless board - see the note in Display_Driver.cpp.
+#if NOMAD_HAS_DISPLAY
+
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t buf1[ LVGL_BUF_LEN ];
 static lv_color_t buf2[ LVGL_BUF_LEN ];
@@ -96,3 +99,5 @@ void Timer_Loop(void)
   lv_timer_handler();           /* let the GUI do its work */
   Lvgl_Unlock();
 }
+
+#endif  // NOMAD_HAS_DISPLAY

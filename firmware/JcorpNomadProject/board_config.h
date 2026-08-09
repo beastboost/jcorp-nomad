@@ -25,6 +25,7 @@
 #define NOMAD_BOARD_WAVESHARE_LCD147 1
 #define NOMAD_BOARD_POCKET_DONGLE_S3 2
 #define NOMAD_BOARD_TDONGLE_S3       3
+#define NOMAD_BOARD_P4_DEV           4
 
 #ifndef NOMAD_BOARD
 #define NOMAD_BOARD NOMAD_BOARD_POCKET_DONGLE_S3
@@ -40,6 +41,7 @@
 
 #define NOMAD_UI_PORTRAIT_TALL  1  // 172x320, the original SquareLine layout
 #define NOMAD_UI_LANDSCAPE_MINI 2  // 160x80, the dongle layout
+#define NOMAD_UI_HEADLESS       3  // no panel; status goes to serial and the web UI
 
 // How the microSD is wired. SDMMC is the 4-bit bus the Waveshare and LilyGO
 // boards use; SPI is a plain 4-wire card on its own SPI host.
@@ -206,11 +208,70 @@
 #define LVGL_BUF_DIVISOR  20
 #define LVGL_FULL_REFRESH 0   // upstream moved to partial refresh; far less SPI traffic
 
+// =========================================================================
+#elif NOMAD_BOARD == NOMAD_BOARD_P4_DEV
+// Guition JC-ESP32P4-M3-DEV. RISC-V, 32 MB PSRAM, 16 MB flash.
+//
+// Two things make this board unlike the other three:
+//
+//   No panel. There is a MIPI-DSI connector but nothing fitted, so this is the
+//   headless profile - LVGL and the display driver are compiled out entirely
+//   and status goes to serial and the web UI. That is most of what the screen
+//   ever showed anyway: SSID, IP, client count.
+//
+//   No radio. Wi-Fi comes from the on-board ESP32-C6 over ESP-Hosted. Nothing
+//   in this file configures that - it is a core/sdkconfig matter - but it is
+//   why the C6's slave firmware version has to match the Arduino core's.
+//
+// The SD pins below are the ESP32-P4 SDMMC slot-0 defaults. This board's actual
+// wiring is not published anywhere I could verify, so NOMAD_SD_USE_DEFAULT_PINS
+// makes the driver call SD_MMC.begin() without setPins() and let the core use
+// its own defaults. Run firmware/NomadP4Probe to find the real pins; if it
+// reports a set that differs, set NOMAD_SD_USE_DEFAULT_PINS to 0 and fill these
+// in.
+#define NOMAD_BOARD_NAME "Guition JC-ESP32P4-M3-DEV"
+
+// ---- display: none -------------------------------------------------------
+#define NOMAD_HAS_DISPLAY 0
+#define NOMAD_UI_LAYOUT   NOMAD_UI_HEADLESS
+
+// ---- microSD: 4-bit SDIO -------------------------------------------------
+#define NOMAD_SD_BUS NOMAD_SD_BUS_SDMMC
+#define NOMAD_SD_USE_DEFAULT_PINS 1
+#define SD_CLK_PIN 43
+#define SD_CMD_PIN 44
+#define SD_D0_PIN  39
+#define SD_D1_PIN  40
+#define SD_D2_PIN  41
+#define SD_D3_PIN  42
+
+// ---- no addressable LED --------------------------------------------------
+#define NOMAD_LED_TYPE NOMAD_LED_NONE
+#define LED_PIN_DATA  -1
+#define LED_PIN_CLOCK -1
+
+// The dev board has a BOOT button on the usual strapping pin. Without a screen
+// the short-press page cycle does nothing, but the long-press USB mass-storage
+// mode still matters.
+#define BOOT_BUTTON_PIN 35
+
 #else
 #error "Unknown NOMAD_BOARD - see board_config.h for the supported profiles"
 #endif
 
 // ------------------------------------------------- shared derived settings
+// Every board with a panel gets the full LVGL UI. Only a profile that has no
+// display says so explicitly, so adding a board cannot accidentally opt out.
+#ifndef NOMAD_HAS_DISPLAY
+#define NOMAD_HAS_DISPLAY 1
+#endif
+
+// SDMMC boards normally name their pins; the P4 profile leaves them to the
+// core's own defaults until the probe reports the real ones.
+#ifndef NOMAD_SD_USE_DEFAULT_PINS
+#define NOMAD_SD_USE_DEFAULT_PINS 0
+#endif
+
 // Backlight PWM. 10-bit resolution gives 0..1023 duty steps.
 #define LCD_BL_PWM_FREQ_HZ 1000
 #define LCD_BL_PWM_BITS    10
