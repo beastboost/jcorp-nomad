@@ -74,7 +74,12 @@
 #define LCD_OFFSET_X 1
 #define LCD_OFFSET_Y 26
 #define LCD_MADCTL   0xA8  // MY | MV | BGR
-#define LCD_INVERT_COLORS 1
+// INVOFF. An earlier revision of this profile sent INVON on the assumption
+// that these small IPS panels need it - on this board they do not, and the
+// screen came out looking like a photo negative. If colours ever look wrong in
+// the *other* way, with red and blue swapped rather than light and dark, that
+// is the BGR bit (0x08) in LCD_MADCTL above, not this.
+#define LCD_INVERT_COLORS 0
 
 #define LCD_PIN_MISO -1
 #define LCD_PIN_MOSI 11
@@ -101,7 +106,14 @@
 #define SD_MOSI_PIN   18
 #define SD_MISO_PIN   16
 #define SD_CS_PIN     47
-#define SD_SPI_FREQ   20000000   // starting point; NomadSD_Mount steps down
+// Starting point only; NomadSD_Mount steps down through 20/10/4/1 MHz until
+// the card answers. Plain SPI carries one bit per clock, so this number is
+// essentially the read speed: 40 MHz is ~5 MB/s where 20 was ~2.5, which on
+// this board is the difference between video playing and stuttering. A card
+// that cannot keep up just fails to mount and the next rung is used, so there
+// is nothing to lose by asking for 40 first. The mount line in the serial log
+// says which speed it settled on.
+#define SD_SPI_FREQ   40000000
 
 // ---- RGB LED -------------------------------------------------------------
 // Not present in the pin list the seller gave. Set to APA102/WS2812 with the
