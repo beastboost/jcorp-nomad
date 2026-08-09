@@ -14,6 +14,14 @@ from . import boards, build, console as c, disks, esp, sdcard, selftest
 
 VERSION = "1.0.0"
 
+
+def _cli_name() -> str:
+    """How to invoke this tool on the current platform, for use in messages.
+    PowerShell will not run a script from the working directory without the
+    leading .\ , and telling people to type a command that then fails is worse
+    than saying nothing."""
+    return ".\\nomad-setup.bat" if sys.platform == "win32" else "nomad-setup"
+
 if sys.version_info < (3, 8):  # pragma: no cover - guard for old interpreters
     sys.exit(
         f"nomad-setup needs Python 3.8 or newer; this is "
@@ -44,7 +52,7 @@ def _pick_disk(args) -> disks.Disk:
                 return d
         raise disks.DiskError(
             f"{args.disk} is not in the list of available disks. "
-            "Run 'nomad-setup list-disks' to see them."
+            f"Run '{_cli_name()} list-disks' to see them."
         )
 
     options = [(d, d.summary()) for d in found]
@@ -191,7 +199,36 @@ def cmd_flash(args) -> int:
     c.info(f"Board: {board.name}")
 
     cli = build.find_arduino_cli(args.arduino_cli)
-    tool = esp.find_esptool(args.esptool, cli.data_dir() if cli else None)
+
+    # ---- toolchain first ---------------------------------------------------
+    # The ESP32 core ships an esptool, so installing it is often what makes
+    # esptool exist at all. Looking for esptool before this point made
+    # --install-deps impossible to run: the command that fixes the problem
+    # would abort on the problem it was meant to fix.
+    sketch = None
+    if not args.firmware:
+        if not cli:
+            raise build.BuildError("arduino-cli not found.\n  " + build.install_hint())
+        c.ok(f"arduino-cli {cli.version}")
+
+        c.heading("Toolchain")
+        build.ensure_core(cli, install=args.install_deps, dry_run=args.dry_run)
+        build.ensure_libraries(cli, install=args.install_deps, dry_run=args.dry_run)
+
+        sketch = Path(args.sketch) if args.sketch else build.find_sketch()
+        build.ensure_lv_conf(cli, sketch, dry_run=args.dry_run)
+
+    # ---- now esptool, which the core install may just have provided --------
+    try:
+        tool = esp.find_esptool(args.esptool, cli.data_dir() if cli else None)
+    except esp.EspError as exc:
+        if cli and not args.install_deps:
+            raise esp.EspError(
+                str(exc) + "\n\n"
+                f"  arduino-cli is installed, so this should fetch it:\n"
+                f"      {_cli_name()} flash --install-deps"
+            )
+        raise
     c.ok(f"esptool {tool.version}")
 
     port = _pick_port(args)
@@ -221,17 +258,6 @@ def cmd_flash(args) -> int:
         artifacts = Path(args.firmware)
         c.info(f"Using prebuilt firmware from {artifacts}")
     else:
-        if not cli:
-            raise build.BuildError("arduino-cli not found.\n  " + build.install_hint())
-        c.ok(f"arduino-cli {cli.version}")
-
-        c.heading("Toolchain")
-        build.ensure_core(cli, install=args.install_deps, dry_run=args.dry_run)
-        build.ensure_libraries(cli, install=args.install_deps, dry_run=args.dry_run)
-
-        sketch = Path(args.sketch) if args.sketch else build.find_sketch()
-        build.ensure_lv_conf(cli, sketch, dry_run=args.dry_run)
-
         c.heading("Build")
         artifacts = build.compile_firmware(
             cli, board, flash_mb, sketch, dry_run=args.dry_run, clean=args.clean,
@@ -395,26 +421,26 @@ def _doctor_next_step(state: dict) -> None:
         c.info(f"    {c.bold(build.install_command())}")
         print()
         c.info("Then reopen your terminal so PATH updates, and run:")
-        c.info(f"    {c.bold('nomad-setup flash --install-deps')}")
+        c.info(f"    {c.bold(_cli_name() + ' flash --install-deps')}")
         return
 
     if not state["cli"]:
         c.info("No arduino-cli, so the firmware cannot be built here. Either:")
         c.info(f"    {c.bold(build.install_command())}")
         c.info("or build in the Arduino IDE and flash what it produces:")
-        c.info(f"    {c.bold('nomad-setup flash --firmware <build output dir>')}")
+        c.info(f"    {c.bold(_cli_name() + ' flash --firmware <build output dir>')}")
         return
 
     if not state["esptool"]:
         c.info("arduino-cli is here but esptool is not. Installing the ESP32")
         c.info("core brings a copy along with everything else needed to build:")
-        c.info(f"    {c.bold('nomad-setup flash --install-deps')}")
+        c.info(f"    {c.bold(_cli_name() + ' flash --install-deps')}")
         return
 
     if not (state["core"] and state["libs"]):
         c.info("Tools are in place; the ESP32 core or libraries still need")
         c.info("fetching. This is a one-off download of roughly a gigabyte:")
-        c.info(f"    {c.bold('nomad-setup flash --install-deps')}")
+        c.info(f"    {c.bold(_cli_name() + ' flash --install-deps')}")
         return
 
     if not state["ports"]:
@@ -425,17 +451,17 @@ def _doctor_next_step(state: dict) -> None:
 
     if not state["disks"]:
         c.info("Ready to flash the firmware:")
-        c.info(f"    {c.bold('nomad-setup flash')}")
+        c.info(f"    {c.bold(_cli_name() + ' flash')}")
         print()
         c.info("The card step needs a reader (the stick cannot expose its own")
         c.info("card until the firmware is on it). With one plugged in:")
-        c.info(f"    {c.bold('nomad-setup sdcard')}")
+        c.info(f"    {c.bold(_cli_name() + ' sdcard')}")
         if not state["elevated"]:
             c.info("    ...from an Administrator prompt - formatting needs elevation.")
         return
 
     c.ok("Everything is in place. Run the guided setup:")
-    c.info(f"    {c.bold('nomad-setup')}")
+    c.info(f"    {c.bold(_cli_name())}")
     if not state["elevated"]:
         c.warn("Use an Administrator prompt so the card step can format.")
 

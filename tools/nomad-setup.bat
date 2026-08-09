@@ -1,10 +1,53 @@
 @echo off
 rem nomad-setup launcher.
-rem   Double-clicking works. The SD card step additionally needs an
-rem   Administrator prompt, because partitioning a disk requires elevation.
+rem
+rem   Re-launches itself elevated, because the SD card step partitions a disk
+rem   and that needs Administrator rights. Set NOMAD_SKIP_ELEVATE=1 to run
+rem   without it - flashing firmware does not need elevation, only the card
+rem   step does.
 setlocal EnableExtensions
 
+rem Work from the script's own folder so an elevated re-launch (which starts in
+rem system32) still finds everything.
+cd /d "%~dp0"
 set "PYTHONPATH=%~dp0;%PYTHONPATH%"
+
+rem ---------------------------------------------------------- elevation ----
+if /i "%NOMAD_SKIP_ELEVATE%"=="1" goto :run
+
+rem fltmc only succeeds when elevated, and exists on every supported Windows.
+rem It is more dependable than "net session", which also needs the Server
+rem service running.
+fltmc >nul 2>&1
+if not errorlevel 1 goto :run
+
+echo.
+echo   nomad-setup needs Administrator rights to format an SD card.
+echo   Asking Windows to re-launch it elevated - accept the prompt.
+echo.
+
+if "%~1"=="" (
+  powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs } catch { exit 1 }"
+) else (
+  powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs } catch { exit 1 }"
+)
+
+if errorlevel 1 (
+  echo.
+  echo   Elevation was declined or failed.
+  echo.
+  echo   Either right-click nomad-setup.bat and pick "Run as administrator",
+  echo   or, if you only want to flash firmware and not touch a card:
+  echo.
+  echo       set NOMAD_SKIP_ELEVATE=1
+  echo       .\nomad-setup.bat %*
+  echo.
+  pause
+)
+rem The elevated copy carries on in its own window; nothing more to do here.
+exit /b
+
+:run
 set "PYEXE="
 
 rem Actually execute each candidate instead of trusting PATH. On Windows a bare
@@ -36,11 +79,12 @@ if not errorlevel 1 set "PYEXE=%*"
 goto :eof
 
 :finish
-rem If this was double-clicked from Explorer the console closes the instant the
-rem script ends, taking any error message with it. Detect that and hold the
-rem window open. Run from a prompt, it returns immediately as normal.
-echo %cmdcmdline% | find /i "%~nx0" >nul
-if not errorlevel 1 (
+rem An elevated window, or one started by double-clicking, closes the instant
+rem the script ends and takes any error message with it. Hold it open in both
+rem cases. Run from an already-elevated prompt, it returns immediately.
+set "HOLD="
+echo %cmdcmdline% | find /i "%~nx0" >nul && set "HOLD=1"
+if defined HOLD (
   echo.
   echo   [nomad-setup exited with code %RC%]
   echo.

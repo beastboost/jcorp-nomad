@@ -69,9 +69,15 @@ with the single command to run next.
 
 ### Running it on Windows
 
-Double-clicking `nomad-setup.bat` works, but for the SD card step you want an
-**Administrator** prompt. Either way, run it from a terminal when something goes
-wrong so the output stays on screen:
+`nomad-setup.bat` re-launches itself as Administrator, because the SD card step
+partitions a disk. Accept the UAC prompt and it carries on in an elevated
+window. If you only want to flash firmware, which needs no elevation, skip it:
+
+```
+set NOMAD_SKIP_ELEVATE=1
+```
+
+Run it from a terminal when something goes wrong so the output stays on screen:
 
 **Command Prompt (cmd.exe):**
 
@@ -197,7 +203,8 @@ run does the firmware first.
 Partitioning a disk needs elevation on every platform:
 
 * Linux / macOS: `sudo ./tools/nomad-setup sdcard`
-* Windows: run `nomad-setup.bat` from an **Administrator** command prompt
+* Windows: `nomad-setup.bat` asks for elevation itself via UAC. Set
+  `NOMAD_SKIP_ELEVATE=1` to bypass that when you are only flashing.
 
 Flashing usually does not. On Linux you may need to be in the `dialout` group
 to open the serial port:
