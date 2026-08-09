@@ -87,7 +87,7 @@ def _fsck(image: Path, start_lba: int, sectors: int,
                 remaining -= len(chunk)
             dst.truncate(sectors * fat32.SECTOR)
         proc = subprocess.run(["fsck.vfat", "-n", str(part_path)],
-                              capture_output=True, text=True, timeout=300)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
         detail = ((proc.stdout or "") + (proc.stderr or "")).strip().splitlines()
         return proc.returncode == 0, (detail[-1] if detail else "clean")
     finally:
@@ -106,11 +106,11 @@ def _mtools_roundtrip(image: Path, start_lba: int) -> Tuple[bool, str]:
         payload = Path(tmp.name)
     try:
         proc = subprocess.run(["mcopy", "-i", target, str(payload), "::/HELLO.TXT"],
-                              capture_output=True, text=True, env=env, timeout=120)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=120)
         if proc.returncode != 0:
             return False, (proc.stderr or proc.stdout or "mcopy failed").strip()[:120]
         proc = subprocess.run(["mdir", "-i", target, "::"],
-                              capture_output=True, text=True, env=env, timeout=120)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=120)
         if proc.returncode != 0 or "HELLO" not in (proc.stdout or ""):
             return False, "file written but not listed back"
         return True, "wrote and read back a file"

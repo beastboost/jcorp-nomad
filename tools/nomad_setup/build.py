@@ -55,9 +55,9 @@ class ArduinoCli:
             return subprocess.CompletedProcess(cmd, 0, "", "")
         c.debug("$ " + " ".join(cmd))
         if stream:
-            proc = subprocess.run(cmd, text=True, timeout=timeout)
+            proc = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         else:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         if check and proc.returncode != 0:
             detail = ""
             if not stream:
@@ -107,7 +107,7 @@ def find_arduino_cli(explicit: Optional[str] = None) -> Optional[ArduinoCli]:
             continue
         try:
             proc = subprocess.run([path, "version", "--format", "json"],
-                                  capture_output=True, text=True, timeout=60)
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
             if proc.returncode == 0:
                 data = json.loads(proc.stdout or "{}")
                 return ArduinoCli(path, data.get("VersionString") or data.get("version") or "?")
@@ -141,6 +141,10 @@ def core_installed(cli: ArduinoCli) -> Optional[str]:
     try:
         data = json.loads(proc.stdout or "[]")
     except json.JSONDecodeError:
+        # Silently reporting "nothing installed" here is how a decoding problem
+        # turns into the tool cheerfully reinstalling everything.
+        c.warn("Could not read 'arduino-cli core list' output; assuming no core")
+        c.debug((proc.stdout or proc.stderr or "")[:400])
         return None
     entries = data.get("platforms", data) if isinstance(data, dict) else data
     for entry in entries or []:
@@ -184,6 +188,9 @@ def installed_libraries(cli: ArduinoCli) -> dict:
     try:
         data = json.loads(proc.stdout or "[]")
     except json.JSONDecodeError:
+        c.warn("Could not read 'arduino-cli lib list' output; "
+               "treating every library as missing")
+        c.debug((proc.stdout or proc.stderr or "")[:400])
         return {}
     entries = data.get("installed_libraries", data) if isinstance(data, dict) else data
     result = {}

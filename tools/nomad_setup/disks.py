@@ -81,7 +81,7 @@ def run(cmd, check=True, capture=True, dry_run=False, input_text=None, timeout=6
         cmd,
         check=False,
         capture_output=capture,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         input=input_text,
         shell=isinstance(cmd, str),
         timeout=timeout,
