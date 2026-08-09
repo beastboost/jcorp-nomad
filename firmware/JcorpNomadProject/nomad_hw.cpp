@@ -11,11 +11,19 @@ SPIClass NomadSdSpi(HSPI);
 NomadSdMountResult NomadSD_Mount(uint8_t maxOpenFiles) {
   // Step the clock down until the card answers. Cheap cards and long traces
   // often refuse the top speed but work fine slower.
-  static const uint32_t freqs[] = {SD_SPI_FREQ, 10000000, 4000000, 1000000};
+  //
+  // Starting high is worth it: on this bus the clock is the whole story. Plain
+  // SPI moves one bit per clock, so 40 MHz is about 5 MB/s at best against
+  // 2.5 MB/s at 20 - the difference between video that plays and video that
+  // stutters. Nothing is risked by asking, because a card that will not run
+  // that fast simply fails to mount and the next rung down is tried.
+  static const uint32_t freqs[] = {SD_SPI_FREQ, 20000000, 10000000, 4000000, 1000000};
 
   NomadSdMountResult r = {false, false, 0, 0};
 
   for (size_t i = 0; i < sizeof(freqs) / sizeof(freqs[0]); ++i) {
+    // SD_SPI_FREQ may already be one of the rungs below it.
+    if (i > 0 && freqs[i] >= freqs[0]) continue;
     NomadSD.end();
     NomadSdSpi.end();
     delay(20);
