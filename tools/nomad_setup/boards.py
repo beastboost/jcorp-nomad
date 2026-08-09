@@ -25,6 +25,10 @@ class Board:
     options: Dict[str, str] = field(default_factory=dict)
     # Fallback if esptool cannot be run (no board attached, permissions, ...).
     default_flash_mb: int = 16
+    # Substring the probed chip name must contain. Guards against flashing an
+    # S3 build onto a P4 and vice versa - they are not even the same ISA.
+    chip_match: str = "S3"
+    chip_name: str = "ESP32-S3"
     notes: str = ""
 
 
@@ -73,6 +77,25 @@ BOARDS: Dict[str, Board] = {
         },
         default_flash_mb=16,
         notes="1.47\" ST7789 172x320, the original Nomad board.",
+    ),
+    "p4-dev": Board(
+        key="p4-dev",
+        name="Guition JC-ESP32P4-M3-DEV (ESP32-P4 + ESP32-C6)",
+        nomad_board=4,
+        fqbn="esp32:esp32:esp32p4",
+        options={
+            # P4 PSRAM is a plain on/off; there is no opi/qspi choice like the S3.
+            "PSRAM": "enabled",
+            "CDCOnBoot": "cdc",
+            "USBMode": "hwcdc",
+            "DebugLevel": "none",
+        },
+        default_flash_mb=16,
+        chip_match="P4",
+        chip_name="ESP32-P4",
+        notes=("RISC-V, no radio of its own - Wi-Fi comes from the on-board C6 "
+               "over ESP-Hosted. 32 MB PSRAM, 4-bit SDIO card slot, USB 2.0 HS. "
+               "Unproven: run NomadP4Probe first."),
     ),
 }
 
