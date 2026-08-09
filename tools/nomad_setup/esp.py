@@ -351,6 +351,30 @@ def autodetect_port(ports: List[SerialPort]) -> Tuple[Optional[SerialPort], str]
     return None, "no port identifies itself as an ESP32"
 
 
+def recheck_port(port: str, explicit: bool = False) -> Tuple[str, str]:
+    """Confirm `port` is still there, just before writing to it.
+
+    COM numbers are not stable. A build takes minutes, and an ESP32-S3 that
+    gets replugged or bounced into download mode in that window comes back on a
+    different number - so the port picked before the compile can be gone by the
+    time we flash. Returns (port to use, note); the note is empty when nothing
+    moved.
+    """
+    ports = list_serial_ports_detailed()
+    if not ports:
+        return port, ""                       # nothing to check against
+    if any(p.device == port for p in ports):
+        return port, ""
+    if explicit:
+        return port, ""                       # the user named it; do not override
+
+    found, why = autodetect_port(ports)
+    if found is None:
+        return port, ""
+    return found.device, (f"{port} is gone - the board is on {found.device} now "
+                          f"({why}). COM numbers move when a board re-enumerates.")
+
+
 # ------------------------------------------------------------ chip probe --
 
 

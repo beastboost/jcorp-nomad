@@ -302,6 +302,13 @@ def cmd_flash(args) -> int:
 
     # ---- write ------------------------------------------------------------
     c.heading("Flashing")
+    # The build took minutes. Re-check rather than trust a port number noted
+    # before it started - they move whenever a board re-enumerates.
+    if not args.dry_run:
+        port, moved = esp.recheck_port(port, explicit=bool(args.port))
+        if moved:
+            c.warn(moved)
+
     if not args.yes and not c.confirm(f"Write the firmware to {port}?", default=True):
         c.info("Cancelled.")
         return 1

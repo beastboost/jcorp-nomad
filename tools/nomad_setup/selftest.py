@@ -365,6 +365,40 @@ def run_port_tests() -> int:
     return failures
 
 
+def run_recheck_tests() -> int:
+    """A COM number noted before a multi-minute build may not survive it."""
+    c.heading("Port re-check before writing")
+    real = esp.list_serial_ports_detailed
+    cases = [
+        ("board moved while building",
+         [_p("COM7", "", 0x303A, 0x1001), _p("COM9", "Bluetooth")], "COM6", False, "COM7", True),
+        ("nothing moved",
+         [_p("COM6", "", 0x303A, 0x1001)], "COM6", False, "COM6", False),
+        ("--port given, never overridden",
+         [_p("COM7", "", 0x303A, 0x1001)], "COM6", True, "COM6", False),
+        ("board gone, nothing to switch to",
+         [_p("COM9", "Bluetooth"), _p("COM8", "Intel")], "COM6", False, "COM6", False),
+        ("cannot enumerate at all", [], "COM6", False, "COM6", False),
+        ("linux re-enumeration",
+         [_p("/dev/ttyACM1", "", 0x303A, 0x1001)], "/dev/ttyACM0", False,
+         "/dev/ttyACM1", True),
+    ]
+    failures = 0
+    rows = []
+    try:
+        for name, ports, before, explicit, want, want_note in cases:
+            esp.list_serial_ports_detailed = lambda ports=ports: ports
+            after, note = esp.recheck_port(before, explicit=explicit)
+            passed = after == want and bool(note) == want_note
+            failures += 0 if passed else 1
+            rows.append([name, "PASS" if passed else "FAIL", before, after,
+                         "warns" if note else ""])
+    finally:
+        esp.list_serial_ports_detailed = real
+    c.table(["situation", "result", "picked earlier", "writes to", "note"], rows)
+    return failures
+
+
 def run_template_tests() -> int:
     """The required-files manifest is only useful if it matches the template
     actually shipped in the repo, so check the two against each other."""
@@ -419,7 +453,7 @@ def cmd_selftest(args) -> int:
 
     failures = (run_fat32_tests() + run_chip_probe_tests()
                 + run_preflight_tests() + run_diagnosis_tests()
-                + run_picker_tests() + run_port_tests()
+                + run_picker_tests() + run_port_tests() + run_recheck_tests()
                 + run_template_tests())
 
     c.heading("Result")
