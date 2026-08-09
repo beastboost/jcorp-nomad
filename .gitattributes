@@ -1,2 +1,6 @@
+# Batch files must keep CRLF: cmd.exe mis-parses labels and goto targets
+# in an LF-only .bat, and git would otherwise normalise them on checkout.
+*.bat text eol=crlf
+
 *.c linguist-vendored
 *.h linguist-vendored
