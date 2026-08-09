@@ -585,6 +585,37 @@ def cmd_list_ports(args) -> int:
         c.ok(f"Would use {found.device} - {why}")
     else:
         c.info(f"Would ask: {why}")
+
+    if not getattr(args, "probe", False):
+        c.info(c.dim("Add --probe to ask each port which chip is behind it."))
+        return 0
+
+    # Boards with a co-processor put more than one chip on the end of one USB
+    # cable - the P4 dev board has an ESP32-C6 for its radio, with its own flash
+    # that erasing the P4 does not touch. Knowing which port reaches which chip
+    # is the difference between erasing the right one and erasing it repeatedly
+    # with no effect.
+    c.heading("What is on each port")
+    try:
+        cli = build.find_arduino_cli(getattr(args, "arduino_cli", None))
+        tool = esp.find_esptool(getattr(args, "esptool", None),
+                                cli.data_dir() if cli else None)
+    except esp.EspError as exc:
+        c.error(str(exc).splitlines()[0])
+        return 1
+
+    rows = []
+    for p in ports:
+        try:
+            info = esp.probe_chip(tool, p.device)
+            rows.append([p.device, info.label,
+                         f"{info.flash_mb} MB" if info.flash_mb else "",
+                         info.mac])
+        except esp.EspError:
+            rows.append([p.device, "no answer", "", ""])
+    c.table(["port", "chip", "flash", "MAC"], rows)
+    c.info("A port that does not answer is either not an ESP, or is held open")
+    c.info("by something else - close any serial monitor and try again.")
     return 0
 
 
@@ -718,7 +749,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_repair.set_defaults(func=cmd_repair_core)
 
     sub.add_parser("list-disks", parents=[common]).set_defaults(func=cmd_list_disks)
-    sub.add_parser("list-ports", parents=[common]).set_defaults(func=cmd_list_ports)
+    p_ports = sub.add_parser("list-ports", parents=[common])
+    p_ports.add_argument("--probe", action="store_true",
+                         help="ask each port which chip is behind it "
+                              "(finds the co-processor on multi-chip boards)")
+    p_ports.set_defaults(func=cmd_list_ports)
 
     return parser
 

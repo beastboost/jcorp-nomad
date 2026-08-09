@@ -98,6 +98,27 @@ variant is needed.
   (`BOARD_PERIMAN_IO_LDO_AUTO`). Any custom variant must carry that over, or the
   card simply never appears, which reads as bad wiring.
 
+### The C6 has its own flash, and `erase` does not reach it
+
+Worth stating plainly, because it is confusing on the bench: **erasing the P4
+cannot change what Wi-Fi network appears.** The P4 has no radio. The SSID comes
+from the C6, which is a separate chip with separate flash, reached over the
+internal SDIO link — not over the USB cable you flash the P4 with.
+
+So a board that shipped with a demo (this one has an ES8311 audio codec, so an
+FFT/spectrum analyser is a natural fit) can keep advertising that demo's AP
+through any number of P4 erases. Removing it means flashing the C6 itself,
+through the header or port wired to `C6_U0RXD`/`C6_U0TXD` (module pins 16/17),
+with `C6_IO9` as its boot strap.
+
+That is also the fix if the C6's ESP-Hosted slave firmware is too old for the
+Arduino core: it is the same operation, writing
+[esp-hosted-mcu](https://github.com/espressif/esp-hosted-mcu) slave firmware
+rather than a demo.
+
+`nomad-setup list-ports --probe` asks every serial port which chip answers on
+it, which is how you find out whether one of them reaches the C6.
+
 ### GPIO35 is double-booked
 
 Sheet 4 puts both `BOOTMODE` (SW1) and `RMII_TXD1` on GPIO35. The boot button
