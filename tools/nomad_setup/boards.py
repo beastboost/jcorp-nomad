@@ -92,7 +92,15 @@ BOARDS: Dict[str, Board] = {
         options={
             # P4 PSRAM is a plain on/off; there is no opi/qspi choice like the S3.
             "PSRAM": "enabled",
-            "CDCOnBoot": "cdc",
+            # NOT cdc, unlike the stick-shaped boards. This board has three USB-C
+            # sockets: two wired straight to the P4's USB PHYs, and one through a
+            # CH340C to UART0 with DTR/RTS driving BOOTMODE and CHIP_PU - which is
+            # the only one that can auto-reset into download mode, so it is the
+            # one you flash on. CDCOnBoot=cdc would put Serial on the *native*
+            # USB port instead, meaning every boot message comes out of a socket
+            # you are not watching while you flash. Leaving it default keeps
+            # Serial on UART0, so one cable does flashing and logs.
+            "CDCOnBoot": "default",
             "USBMode": "hwcdc",
             "DebugLevel": "none",
         },
