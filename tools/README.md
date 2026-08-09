@@ -64,10 +64,25 @@ tools\nomad-setup.bat               # same thing on Windows
 | `nomad-setup flash` | Build (or take prebuilt binaries) and write to the board |
 | `nomad-setup sdcard` | Format a card and copy the Nomad files onto it |
 | `nomad-setup repair-core` | Reinstall the ESP32 board package and clear the build caches |
+| `update.bat` | Fetch the latest code from GitHub (Windows) |
 | `nomad-setup list-disks` / `list-ports` | Just the lists |
 
 Start with `doctor`. It reports what is installed, what is missing, and ends
 with the single command to run next.
+
+### Keeping up to date
+
+Don't re-download the zip. Run:
+
+```
+tools\update.bat
+```
+
+If the folder is already a git clone it pulls. If you unzipped it, the first run
+converts it into a clone in place — files the repository tracks are replaced,
+anything you added yourself is left alone — and every run after that is a plain
+pull. With no git installed it falls back to downloading and unpacking the zip
+over the top, though `winget install Git.Git` makes it far quicker.
 
 ### Running it on Windows
 

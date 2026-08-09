@@ -65,6 +65,10 @@ void NomadUI_Tick(void) {
   lv_timer_handler();
 }
 
+void NomadUI_SetBrightness(uint8_t percent) {
+  Set_Backlight(percent);
+}
+
 // Recursive mutex, so the setters can be called inside a held lock.
 bool NomadUI_Lock(uint32_t timeoutMs) { return Lvgl_Lock(timeoutMs); }
 void NomadUI_Unlock(void) { Lvgl_Unlock(); }
@@ -330,6 +334,7 @@ void NomadUI_Init(void) {
 
 void NomadUI_Flush(void) {}
 void NomadUI_Tick(void) {}
+void NomadUI_SetBrightness(uint8_t percent) { (void)percent; }
 bool NomadUI_Lock(uint32_t timeoutMs) { (void)timeoutMs; return true; }
 void NomadUI_Unlock(void) {}
 void NomadUI_SetRotation(bool flip180) { (void)flip180; }

@@ -39,6 +39,10 @@ int  NomadUI_PageCount(void);
 // reboot or block, where the normal LVGL task will not get another turn.
 void NomadUI_Flush(void);
 
+// Panel brightness, 0-100. No-op where there is no panel, or where the panel
+// has no backlight GPIO (the Pocket-Dongle's is hardwired on).
+void NomadUI_SetBrightness(uint8_t percent);
+
 // Flip the panel 180 degrees and repaint. Writing MADCTL leaves whatever is
 // already in panel RAM mirrored, so this always repaints rather than leaving
 // the caller to remember.

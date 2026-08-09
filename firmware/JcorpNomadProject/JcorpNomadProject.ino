@@ -4195,7 +4195,9 @@ void setup() {
       delay(500);
       Serial.println(">>> USB mode: mounting SD & starting MSC");
       NomadUI_Init();
+#if defined(SOC_BT_SUPPORTED) && SOC_BT_SUPPORTED
       btStop(); //Stops bluetooth (dont need)
+#endif
       NomadUI_Message("USB Mass-Storage Mode\n\nEject or press the button\nto return to media mode");
       NomadUI_Flush();
 
@@ -4439,7 +4441,7 @@ Serial.println("SD Card initialized successfully!");
     // table until the next scan, not a degraded boot.
     loadSdBreakdownFromFile();
 
-    Set_Backlight(settings.brightness);  // now using loaded value
+    NomadUI_SetBrightness(settings.brightness);  // now using loaded value
     updateSDBAR(); // will show cached values loaded above (if any)
 
     // Start the storage monitor (unchanged)
@@ -5431,7 +5433,7 @@ server.on("/auth/logout", HTTP_POST, [](AsyncWebServerRequest *request){
         // Clamp to Set_Backlight's valid 0-100 range; out-of-range values are
         // silently dropped by Set_Backlight and would corrupt the slider display.
         settings.brightness = constrain(doc["value"].as<int>(), 0, 100);
-        Set_Backlight(settings.brightness);  // Apply brightness immediately, at long last
+        NomadUI_SetBrightness(settings.brightness);  // Apply brightness immediately, at long last
         saveSettings();  // Save to SD card
         request->send(200, "application/json", "{\"status\":\"updated\"}");
       } else {
@@ -5983,7 +5985,9 @@ server.on("/auth/logout", HTTP_POST, [](AsyncWebServerRequest *request){
 
       Serial.println(">>> Preparing display to show FLASH mode message...");
       NomadUI_Init();
+#if defined(SOC_BT_SUPPORTED) && SOC_BT_SUPPORTED
       btStop(); // stop bluetooth tasks if applicable (dont use it for anything, give wifi full control of antenna)
+#endif
 
       NomadUI_Message("Flashing Mode\nReady for Update");
       // Give LVGL a few cycles to flush to the screen so the user sees the message
@@ -5997,10 +6001,15 @@ server.on("/auth/logout", HTTP_POST, [](AsyncWebServerRequest *request){
   #else
       // No software route into the ROM stub on this part. Say what to do by
       // hand rather than restarting into the same firmware and looking broken.
-      Serial.println(">>> This chip has no software force-download. Hold BOOT and");
-      Serial.println(">>> tap RESET to enter download mode, then flash as usual.");
-      set_boot_mode(FLASH_MODE);
-      ESP.restart();
+      // No FLASH_MODE exists - boot_mode.h only knows MEDIA_MODE and USB_MODE.
+      // The old #else branch referenced one and never compiled, because
+      // ARDUINO_ARCH_ESP32 was always true until the P4 arrived.
+      //
+      // Deliberately no restart: rebooting into the same firmware would look
+      // like the button did nothing. The board has real buttons, so say so and
+      // leave it running to serve the page that says it.
+      Serial.println(">>> This chip has no software force-download.");
+      Serial.println(">>> Hold BOOT, tap RESET, then flash as usual.");
   #endif
     });
   server.on("/enterUsb", HTTP_POST, [](AsyncWebServerRequest *request){
@@ -6128,6 +6137,11 @@ server.on("/auth/logout", HTTP_POST, [](AsyncWebServerRequest *request){
 
     esp_core_dump_summary_t *cdSum = (esp_core_dump_summary_t *)malloc(sizeof(esp_core_dump_summary_t));
     if (cdSum && esp_core_dump_get_summary(cdSum) == ESP_OK) {
+      // esp_core_dump_summary_t is architecture specific past exc_task/exc_pc.
+      // exc_bt_info (the backtrace array) exists only on Xtensa, and ex_info
+      // holds completely different registers on RISC-V - mcause/mtval rather
+      // than exc_vaddr. So the detailed print is Xtensa-only.
+#if defined(CONFIG_IDF_TARGET_ARCH_XTENSA)
       Serial.printf("[DIAG] COREDUMP task=%s  PC=0x%08x  faultAddr=0x%08x  depth=%u corrupted=%d\n",
                     cdSum->exc_task, (unsigned)cdSum->exc_pc,
                     (unsigned)cdSum->ex_info.exc_vaddr,
@@ -6137,6 +6151,15 @@ server.on("/auth/logout", HTTP_POST, [](AsyncWebServerRequest *request){
         Serial.printf(" 0x%08x", (unsigned)cdSum->exc_bt_info.bt[cdI]);
       }
       Serial.println();
+#else
+      // RISC-V: the portable fields still name the task that died and where.
+      // For registers and a backtrace, pull the dump off with
+      // `espcoredump.py info_corefile`.
+      Serial.printf("[DIAG] COREDUMP task=%s  PC=0x%08x\n",
+                    cdSum->exc_task, (unsigned)cdSum->exc_pc);
+      Serial.println("[DIAG] COREDUMP backtrace: not available on RISC-V "
+                     "(use espcoredump.py info_corefile)");
+#endif
     } else {
       Serial.println("[DIAG] no core dump stored (or no coredump partition in the flashed scheme)");
     }
