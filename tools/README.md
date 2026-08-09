@@ -205,7 +205,8 @@ flash you can use the stick itself.
 ```
 --board <profile>                      pocket-dongle (GNPE stick, default),
                                        t-dongle (LilyGO), waveshare-1.47,
-                                       p4-dev (Guition ESP32-P4, headless)
+                                       p4-dev (Guition ESP32-P4, headless),
+                                       p4-nano (Waveshare ESP32-P4-NANO)
 --dry-run                              print every step, touch nothing
 --install-deps                         fetch the ESP32 core and libraries
 --firmware <dir>                       flash prebuilt binaries, skip the build
