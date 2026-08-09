@@ -64,6 +64,36 @@ tools\nomad-setup.bat               # same thing on Windows
 
 Start with `doctor`. It tells you what is missing before anything is at stake.
 
+### Running it on Windows
+
+Double-clicking `nomad-setup.bat` works, but for the SD card step you want an
+**Administrator** prompt. Either way, run it from a terminal when something goes
+wrong so the output stays on screen:
+
+**Command Prompt (cmd.exe):**
+
+```
+cd C:\path\to\jcorp-nomad\tools
+nomad-setup.bat doctor
+nomad-setup.bat doctor > nomad-doctor.txt 2>&1     REM capture everything
+```
+
+**PowerShell** will not run a script from the current directory without an
+explicit path, so prefix it with `.\`:
+
+```powershell
+cd C:\path\to\jcorp-nomad\tools
+.\nomad-setup.bat doctor
+.\nomad-setup.bat doctor *> nomad-doctor.txt      # capture everything
+```
+
+Redirecting matters when reporting a problem: `2>&1` in cmd, `*>` in
+PowerShell. Without it the error text goes to a separate stream and is lost.
+
+If you double-click it and the window closes instantly, the launcher now holds
+it open and prints the exit code. A window that still vanishes means `cmd` never
+reached the script at all, usually a path or permissions problem.
+
 ### Useful flags
 
 ```
