@@ -198,6 +198,23 @@ Reflash from binaries somebody else built:
 
 ---
 
+## Which port the board is on
+
+You should not have to answer this. The dongle enumerates on Espressif's own
+USB vendor ID (`0x303A`), so the tool identifies it among however many COM
+ports your machine has and says which one it chose and why. Detection runs
+fresh every time — no port number is remembered between runs, because they
+move.
+
+It asks only when the answer is genuinely in doubt: two ESP32s connected at
+once, or two USB-serial adapters and no native device. Guessing there could
+write to the wrong board, so it does not.
+
+Because a build takes minutes and a board that re-enumerates in that window
+comes back on a different number, the port is re-checked immediately before the
+write. If it moved, the tool follows it and tells you. `--port` is never
+second-guessed — pass it and that is what gets written to.
+
 ## Getting the board into the bootloader
 
 The dongle has no reset button. If `flash` cannot find or talk to it: unplug
