@@ -300,17 +300,24 @@
 // an ESP32-C6-MINI over SDIO for the radio, 32 MB PSRAM, 16 MB flash - on a
 // board Waveshare actually document, with Ethernet and PoE.
 //
-// Sourcing, stated up front because it matters: I have not had this board on a
-// bench, and Waveshare's site is unreachable from where this was written. The
-// pins below are the ESP32-P4 *reference design*, which there is good reason to
-// think Waveshare follow: their own arduino-esp32 variant for the P4-POE-ETH
-// board is byte-identical to Espressif's generic esp32p4 variant through the
-// SDMMC, LDO and boot-strapping blocks. Cross-checked against ESP-IDF's
-// soc/esp32p4/sdmmc_pins.h and esp-bsp's P4 Function EV board.
+// Pins confirmed against Waveshare's own sources, not inferred:
 //
-// So: well-founded, not confirmed. Run firmware/NomadP4Probe first - it prints
-// the pins actually compiled in and mounts the card, which settles it in one
-// boot.
+//   SD      github.com/waveshareteam/ESP32-P4-Platform,
+//           examples/esp-idf/09_sdmmc/main/Kconfig.projbuild gives, for
+//           IDF_TARGET_ESP32P4: CMD 44, CLK 43, D0 39, D1 40, D2 41, D3 42.
+//           Waveshare's published pinout corroborates by omission - GPIO39-44
+//           are the only gap in that range on the GPIO header, because the TF
+//           slot has them.
+//
+//   C6      the same repo's firmware/brookesia/sdkconfig.defaults sets
+//           CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y, so this board uses the
+//           P4 Function EV board's hosted SDIO preset - CLK 18, CMD 19,
+//           D0-D3 14-17, reset 54 - which is exactly what the stock esp32p4
+//           Arduino variant hardcodes. Nothing custom needed.
+//
+//   UART0   TXD 37, RXD 38, both broken out on the GPIO header.
+//
+// Still not run on hardware here. NomadP4Probe confirms in one boot.
 #define NOMAD_BOARD_NAME "Waveshare ESP32-P4-NANO"
 
 // ---- display: none fitted -------------------------------------------------
@@ -330,7 +337,7 @@
 // reference design those are the same numbers, and if this one does not then a
 // wrong hard-coded map is worse than none. The probe reports the truth.
 #define NOMAD_SD_BUS NOMAD_SD_BUS_SDMMC
-#define NOMAD_SD_USE_DEFAULT_PINS 1
+#define NOMAD_SD_USE_DEFAULT_PINS 0   // sourced from Waveshare, so name them
 #define SD_CLK_PIN 43
 #define SD_CMD_PIN 44
 #define SD_D0_PIN  39
@@ -343,9 +350,10 @@
 #define LED_PIN_DATA  -1
 #define LED_PIN_CLOCK -1
 
-// GPIO35 is the P4's BOOT_MODE strapping pin. This board also has USER and
-// RESET buttons; USER is not wired here because its GPIO is not documented
-// anywhere I could reach.
+// GPIO35 is the P4's BOOT_MODE strapping pin, and unlike the Guition board it
+// is not shared with the Ethernet PHY here - Waveshare's pinout does not bring
+// GPIO35 out at all, and this board has its own BOOT button. There is a USER
+// button too; its GPIO is not in the published pinout, so it is left unwired.
 #define BOOT_BUTTON_PIN 35
 
 #else

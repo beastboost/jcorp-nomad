@@ -237,14 +237,37 @@ Two differences from the Guition profile, both deliberate:
   certainly right, but on a board I have not seen, letting the core choose beats
   a hard-coded map that might be wrong.
 
-Sourcing: the pins are the ESP32-P4 reference design, cross-checked against
-ESP-IDF's `soc/esp32p4/sdmmc_pins.h`, esp-bsp's P4 Function EV board, and
-Waveshare's own `waveshare_p4_poe_eth` Arduino variant — which is byte-identical
-to the generic `esp32p4` variant through the SDMMC, LDO and boot blocks, which
-is the reason to think Waveshare follow the reference on their P4 boards.
-Waveshare's own site is unreachable from this environment, so none of it is
-confirmed against *this* board's schematic. Run `NomadP4Probe` once and it
-settles in a single boot.
+**Pins confirmed from Waveshare's own repository**,
+[waveshareteam/ESP32-P4-Platform](https://github.com/waveshareteam/ESP32-P4-Platform):
+
+| what | pins | source |
+| --- | --- | --- |
+| microSD | CLK 43, CMD 44, D0–D3 39–42 | `examples/esp-idf/09_sdmmc/main/Kconfig.projbuild`, `IDF_TARGET_ESP32P4` defaults |
+| P4 ↔ C6 SDIO | CLK 18, CMD 19, D0–D3 14–17, reset 54 | `firmware/brookesia/sdkconfig.defaults` sets `CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y` |
+| UART0 | TXD 37, RXD 38 | published pinout, both on the GPIO header |
+
+The C6 line is the useful one: Waveshare build ESP-Hosted with the **P4 Function
+EV board preset**, which is exactly the pin set the stock `esp32p4` Arduino
+variant hardcodes. So no custom variant is needed for Wi-Fi on this board.
+
+The published pinout corroborates the SD pins by omission — GPIO39–44 are the
+only gap in that range on the header, because the TF slot has them. Same trick
+that identified the C6 link on the Guition board.
+
+Still not run on hardware here. `NomadP4Probe` confirms in a single boot.
+
+### Waveshare's own warning about Arduino
+
+Their docs carry it, and it is fair: *"ESP32-P4 currently has limited adaptation
+on the Arduino platform. To ensure development stability, it is recommended to
+use ESP-IDF at this stage."*
+
+Nomad is an Arduino sketch, so that is the path regardless — but it is why the
+P4 needed four rounds of `soc/rtc_cntl_reg.h`, `btStop`, `Set_Backlight` and
+core-dump-struct fixes that the S3 never did. Those are all done. Expect the
+occasional further gap rather than a smooth ride, and note that the Guition
+board did run the probe and the full firmware on Arduino, so "limited" is not
+"broken".
 
 ## Building it
 
